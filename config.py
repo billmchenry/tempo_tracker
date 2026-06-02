@@ -23,10 +23,11 @@ HUB_MESSAGE_HEADER = (
 
 HUB_MESSAGE_FOOTER = (
     "---\n"
-    "CapEx hours = all hours logged to CapEx-eligible Jira issues this period. "
-    "Target: {capex_target_hours}h (reduced proportionally for any weekday PTO logged).\n"
-    "On track = current pace projects to meeting the (PTO-adjusted) target by period end.\n"
-    "Days not reported = weekdays (Mon–Fri) from period start through today with zero hours logged.\n"
+    "CAPEX GOAL: target is {capex_target_hours}h of CapEx-eligible Jira time per period. "
+    "✓ = current pace projects to meeting the target by period end. "
+    "Reduced proportionally for any weekday PTO logged (shown as adj:).\n"
+    "DAILY LOGGING: every weekday must have at least some time logged (any project, not just CapEx). "
+    "Today is excluded — the team may not have entered time yet. "
     "All times are Eastern. Team members in earlier time zones (e.g. India IST) who log "
     "after midnight local time will have those hours counted on the previous Eastern calendar day."
 )

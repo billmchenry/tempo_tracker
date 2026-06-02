@@ -4,6 +4,32 @@ import requests
 
 import config
 
+# Column widths for plain-text alignment
+_W_NAME   = 16
+_W_HOURS  = 9   # "  49.2h  "
+_W_CAPEX  = 30  # "✓ on track (adj: 48h)"
+_W_DAILY  = 24  # "✗ 2 of 6 days missed"
+_SEP      = "  |  "
+
+
+def _capex_col(s: dict) -> str:
+    text = "✓ on track" if s["on_track"] else "✗ behind pace"
+    if s["pto_hours"] > 0:
+        text += f" (adj: {s['adjusted_target']}h)"
+    return text
+
+
+def _daily_col(s: dict) -> str:
+    n = s["days_not_reported"]
+    total = s["reporting_work_days"]
+    if total == 0:
+        return "- period just started"
+    if n == 0:
+        return "✓ all days logged"
+    if n == total:
+        return f"✗ all {total} days missed"
+    return f"✗ {n} of {total} days missed"
+
 
 def build_message(team_name: str, run_timestamp: str, period: dict,
                   days_remaining: int, stats: list, elapsed_work_days: int) -> str:
@@ -19,16 +45,20 @@ def build_message(team_name: str, run_timestamp: str, period: dict,
         f"TEAM PROGRESS ({elapsed_work_days} working days elapsed):\n",
     ]
 
+    # Header row
+    h_name  = "NAME".ljust(_W_NAME)
+    h_hours = "CAPEX HRS".ljust(_W_HOURS)
+    h_capex = "CAPEX GOAL".ljust(_W_CAPEX)
+    h_daily = "DAILY LOGGING"
+    lines.append(f"  {h_name}{_SEP}{h_hours}{_SEP}{h_capex}{_SEP}{h_daily}")
+    lines.append("  " + "-" * (_W_NAME + _W_HOURS + _W_CAPEX + _W_DAILY + len(_SEP) * 3))
+
     for s in stats:
-        pace_str = "✓ on track" if s["on_track"] else "✗ behind pace"
-        if s["pto_hours"] > 0:
-            pace_str += f" (adj. target: {s['adjusted_target']}h w/ {s['pto_hours']}h PTO)"
-        lines.append(
-            f"  {s['name']:<15} "
-            f"{s['capex_hours']:>5.1f}h CapEx  |  "
-            f"{pace_str:<45}  |  "
-            f"{s['days_not_reported']} of {s['elapsed_work_days']} days not reported"
-        )
+        name  = s["name"].ljust(_W_NAME)
+        hours = f"{s['capex_hours']:.1f}h".ljust(_W_HOURS)
+        capex = _capex_col(s).ljust(_W_CAPEX)
+        daily = _daily_col(s)
+        lines.append(f"  {name}{_SEP}{hours}{_SEP}{capex}{_SEP}{daily}")
 
     lines.append(
         "\n" + config.HUB_MESSAGE_FOOTER.format(

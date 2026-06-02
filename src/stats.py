@@ -11,18 +11,31 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list) -> tup
     """Return (stats_list, elapsed_work_days).
 
     stats_list: one dict per member (sorted by name):
-        name, capex_hours, on_track, days_not_reported,
-        elapsed_work_days, pto_hours, adjusted_target
+        name, capex_hours, on_track, daily_ok, days_not_reported,
+        reporting_work_days, elapsed_work_days, pto_hours, adjusted_target
+
+    elapsed_work_days  : working days period-start → today (for header display)
+    reporting_work_days: working days period-start → yesterday (daily check
+                         excludes today — team may not have logged yet)
     """
-    today        = date.today()
+    today     = date.today()
+    yesterday = today - timedelta(days=1)
+
     period_start = pd.Timestamp(period["start"])
     period_end   = pd.Timestamp(period["end"])
     cutoff       = min(pd.Timestamp(today), period_end)
     tomorrow     = pd.Timestamp(today + timedelta(days=1))
 
-    total_work_days    = len(pd.bdate_range(period_start, period_end))
-    elapsed_work_days  = len(pd.bdate_range(period_start, cutoff))
+    total_work_days     = len(pd.bdate_range(period_start, period_end))
+    elapsed_work_days   = len(pd.bdate_range(period_start, cutoff))
     remaining_work_days = len(pd.bdate_range(tomorrow, period_end))
+
+    # Daily reporting check: only days through yesterday are expected to have entries
+    report_cutoff       = min(pd.Timestamp(yesterday), period_end)
+    reporting_work_days = (
+        len(pd.bdate_range(period_start, report_cutoff))
+        if report_cutoff >= period_start else 0
+    )
 
     stats = []
     for member in sorted(all_members):
@@ -37,9 +50,10 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list) -> tup
             ["Logged Hours"].sum()
         )
 
-        past = mdf[pd.to_datetime(mdf["Work_date_only"]) <= pd.Timestamp(today)]
+        # Days logged through yesterday only
+        past = mdf[pd.to_datetime(mdf["Work_date_only"]) <= pd.Timestamp(yesterday)]
         days_reported     = int(past["Work_date_only"].nunique())
-        days_not_reported = max(0, elapsed_work_days - days_reported)
+        days_not_reported = max(0, reporting_work_days - days_reported)
 
         pace      = capex_hours / elapsed_work_days if elapsed_work_days > 0 else 0.0
         projected = capex_hours + pace * remaining_work_days
@@ -51,13 +65,15 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list) -> tup
         )
 
         stats.append({
-            "name":              member,
-            "capex_hours":       round(capex_hours, 1),
-            "on_track":          projected >= adjusted_target,
-            "days_not_reported": days_not_reported,
-            "elapsed_work_days": elapsed_work_days,
-            "pto_hours":         round(pto_hours, 1),
-            "adjusted_target":   round(adjusted_target, 1),
+            "name":                member,
+            "capex_hours":         round(capex_hours, 1),
+            "on_track":            projected >= adjusted_target,
+            "daily_ok":            days_not_reported == 0,
+            "days_not_reported":   days_not_reported,
+            "reporting_work_days": reporting_work_days,
+            "elapsed_work_days":   elapsed_work_days,
+            "pto_hours":           round(pto_hours, 1),
+            "adjusted_target":     round(adjusted_target, 1),
         })
 
     return stats, elapsed_work_days
