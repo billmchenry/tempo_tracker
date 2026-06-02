@@ -1,0 +1,29 @@
+name: Tempo CapEx Report
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'  # 4am MDT Mon–Fri (UTC-6); drifts to 3am MST (UTC-7) in winter
+  workflow_dispatch:          # manual trigger from GitHub Actions UI
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Tempo report
+        env:
+          TEMPO_TOKEN:   ${{ secrets.TEMPO_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL:    ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN:    ${{ secrets.JIRA_TOKEN }}
+          HUB_API_KEY:   ${{ secrets.HUB_API_KEY }}
+        run: python main.py

@@ -5,7 +5,12 @@ Usage:
     python main.py --team "Agent Experience Product Team"
     python main.py --from 2025-12-27 --to 2026-01-23
     python main.py --refresh-cache   # clears Jira issue + user cache
-    python main.py --no-hub          # skip posting to Hub (preview MD still written)
+    python main.py --no-hub          # skip posting to Hub (preview MD still written locally)
+
+CI mode (GitHub Actions):
+    Detected automatically via GITHUB_ACTIONS=true env var.
+    Skips all file output (no CSV, charts, or Google Drive writes).
+    Logs go to stdout only. Hub API is still called.
 """
 
 import argparse
@@ -20,24 +25,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Ensure stdout handles Unicode (matters on Windows when running in CI simulation)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 import config
 from src import tempo_client, jira_client, processor, charts, stats as stats_mod, hub_client
 
 _TEAMS_FILE = os.path.join(os.path.dirname(__file__), "teams.json")
 
+# Automatically true when running inside GitHub Actions
+CI_MODE = os.environ.get("GITHUB_ACTIONS") == "true"
 
-def write_log(log_path: str, message: str):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def write_log(log_path: str | None, message: str):
+    ts   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"{ts} - {message}"
     print(line)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    if log_path:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
 
 def find_active_period(today: date) -> dict | None:
     for p in config.CAPEX_PERIODS:
         start = date.fromisoformat(p["start"])
-        end = date.fromisoformat(p["end"])
+        end   = date.fromisoformat(p["end"])
         if start <= today <= end:
             return p
     return None
@@ -55,8 +68,11 @@ def _save_teams(teams: list):
 
 
 def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to,
-                 credentials, log_fn):
-    """Run the full pipeline for a single team. Returns (df, all_member_names)."""
+                 credentials, log_fn, ci_mode=False):
+    """Run the full pipeline for a single team. Returns (df, all_member_names).
+
+    ci_mode: when True, skips CSV and chart generation (no file I/O).
+    """
     tempo_token, jira_base_url, jira_email, jira_token = credentials
 
     log_fn(f"Fetching team members for: {team_name} (ID={team_id})...")
@@ -88,13 +104,17 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
     )
     log_fn(f"Processed {len(df)} rows.")
 
-    csv_path = os.path.join(output_dir, f"Processed_Tempo_{timestamp}.csv")
-    df.to_csv(csv_path, index=False)
-    log_fn(f"Processed CSV saved to {csv_path}.")
+    if not ci_mode:
+        csv_path = os.path.join(output_dir, f"Processed_Tempo_{timestamp}.csv")
+        df.to_csv(csv_path, index=False)
+        log_fn(f"Processed CSV saved to {csv_path}.")
 
-    log_fn("Generating charts...")
-    all_member_names = sorted(members.values())
-    charts.generate(df, output_dir, period, log_fn, all_members=all_member_names)
+        log_fn("Generating charts...")
+        all_member_names = sorted(members.values())
+        charts.generate(df, output_dir, period, log_fn, all_members=all_member_names)
+    else:
+        all_member_names = sorted(members.values())
+        log_fn("CI mode: skipping CSV and chart generation.")
 
     log_fn(f"Team '{team_name}' completed successfully.")
     return df, all_member_names
@@ -102,14 +122,17 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
 
 def main():
     parser = argparse.ArgumentParser(description="Tempo reporting dashboard")
-    parser.add_argument("--team",      dest="team",      help="Run for a single team (exact name from teams.json)")
-    parser.add_argument("--from",      dest="from_date", help="Override start date YYYY-MM-DD")
-    parser.add_argument("--to",        dest="to_date",   help="Override end date YYYY-MM-DD")
+    parser.add_argument("--team",         dest="team",      help="Run for a single team (exact name from teams.json)")
+    parser.add_argument("--from",         dest="from_date", help="Override start date YYYY-MM-DD")
+    parser.add_argument("--to",           dest="to_date",   help="Override end date YYYY-MM-DD")
     parser.add_argument("--refresh-cache", action="store_true",
                         help="Clear Jira issue + user cache before running")
-    parser.add_argument("--no-hub", action="store_true",
-                        help="Skip posting to Hub (Hub_Message_Preview.md is still written)")
+    parser.add_argument("--no-hub",       action="store_true",
+                        help="Skip posting to Hub (preview MD still written locally)")
     args = parser.parse_args()
+
+    if CI_MODE:
+        print("Running in CI mode (GitHub Actions) — file output disabled.")
 
     # --- Credentials ---
     tempo_token   = os.environ.get("TEMPO_TOKEN",   "").strip()
@@ -162,10 +185,15 @@ def main():
     effective_to = period["end"]
 
     # --- Output setup ---
-    timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(config.OUTPUT_BASE, f"Tempo_{timestamp}_final")
-    os.makedirs(output_dir, exist_ok=True)
-    log_path   = os.path.join(output_dir, f"Tempo_log_{timestamp}.txt")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if CI_MODE:
+        output_dir = None
+        log_path   = None
+    else:
+        output_dir = os.path.join(config.OUTPUT_BASE, f"Tempo_{timestamp}_final")
+        os.makedirs(output_dir, exist_ok=True)
+        log_path   = os.path.join(output_dir, f"Tempo_log_{timestamp}.txt")
 
     def log(msg):
         write_log(log_path, msg)
@@ -178,14 +206,18 @@ def main():
         jira_client.clear_cache()
         log("Jira issue + user cache cleared.")
 
-    credentials = (tempo_token, jira_base_url, jira_email, jira_token)
+    credentials   = (tempo_token, jira_base_url, jira_email, jira_token)
     teams_modified = False
 
     for team_cfg in teams_to_run:
         team_name = team_cfg["name"]
-        team_output_dir = os.path.join(output_dir, _slug(team_name))
-        os.makedirs(team_output_dir, exist_ok=True)
         log(f"--- Running: {team_name} ---")
+
+        if CI_MODE:
+            team_output_dir = None
+        else:
+            team_output_dir = os.path.join(output_dir, _slug(team_name))
+            os.makedirs(team_output_dir, exist_ok=True)
 
         # Resolve Tempo team ID — use cached ID if available, otherwise look up by
         # name and save it back to teams.json so future runs are rename-proof.
@@ -203,7 +235,7 @@ def main():
         try:
             df, all_member_names = run_for_team(
                 team_name, team_id, team_output_dir, timestamp, period,
-                effective_to, credentials, log,
+                effective_to, credentials, log, ci_mode=CI_MODE,
             )
         except Exception as e:
             log(f"WARNING: '{team_name}' failed — {e}. Run continues.")
@@ -212,7 +244,7 @@ def main():
         if df is None:
             continue
 
-        # --- Hub message (always preview to MD; post live if key is available) ---
+        # --- Hub message ---
         eastern        = ZoneInfo("America/New_York")
         run_ts         = datetime.now(eastern).strftime("%Y-%m-%d %H:%M ET")
         days_remaining = (date.fromisoformat(period["end"]) - today).days
@@ -222,11 +254,14 @@ def main():
             team_name, run_ts, period, days_remaining, team_stats, elapsed
         )
 
-        # Write preview MD — always, so you can review before the API key is set
-        preview_path = os.path.join(team_output_dir, "Hub_Message_Preview.md")
-        with open(preview_path, "w", encoding="utf-8") as f:
-            f.write(f"# Hub Message Preview\n\n```\n{message}\n```\n")
-        log(f"Hub message preview saved to {preview_path}.")
+        if CI_MODE:
+            # No file system — log the message to the Actions console instead
+            log(f"Hub message preview:\n{message}")
+        else:
+            preview_path = os.path.join(team_output_dir, "Hub_Message_Preview.md")
+            with open(preview_path, "w", encoding="utf-8") as f:
+                f.write(f"# Hub Message Preview\n\n```\n{message}\n```\n")
+            log(f"Hub message preview saved to {preview_path}.")
 
         conv_id = team_cfg.get("hub_conversation_id", "")
         if args.no_hub:
@@ -242,12 +277,13 @@ def main():
             except Exception as e:
                 log(f"WARNING: Hub posting failed — {e}. Run continues.")
 
-    # Persist any newly resolved team IDs back to teams.json
-    if teams_modified:
+    # Persist any newly resolved team IDs — only meaningful in local mode
+    if teams_modified and not CI_MODE:
         _save_teams(config.TEMPO_TEAMS)
 
     log("All teams completed.")
-    print(f"\nOutput saved to: {output_dir}")
+    if not CI_MODE:
+        print(f"\nOutput saved to: {output_dir}")
 
 
 if __name__ == "__main__":
