@@ -1,4 +1,10 @@
-TEMPO_TEAM_NAME = "Agent Experience Product Team"
+import json
+import os
+
+_teams_file = os.path.join(os.path.dirname(__file__), "teams.json")
+with open(_teams_file, encoding="utf-8") as _f:
+    TEMPO_TEAMS: list[dict] = json.load(_f)
+
 OUTPUT_BASE = r"G:\My Drive\Tempo"
 
 # 2026 CapEx reporting periods (Start Day → Cut Off Day).

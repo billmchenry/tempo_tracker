@@ -1,9 +1,8 @@
 """One-time setup helper.
 
 Run this after cloning to:
-1. Validate Tempo credentials and list available teams
+1. Validate Tempo credentials and list all available teams
 2. Confirm the Jira Capex Project Type field ID
-3. Test that 'Agent Experience Product Team' exists in Tempo
 
 Usage: python setup.py
 """
@@ -79,7 +78,8 @@ def main():
         sys.exit(1)
 
     print("\nSetup check complete.")
-    print("If 'Agent Experience Product Team' appears above, you're good to go.")
+    print("Verify your team names above match what you configure in teams.json.")
+    print("Run 'python manage_teams.py list' to see configured teams.")
     print("Verify JIRA_CAPEX_FIELD_ID in config.py matches what's listed above.")
 
 

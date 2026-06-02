@@ -44,7 +44,7 @@ def get_team_members(token: str, team_id: str) -> dict:
         url = data.get("metadata", {}).get("next")
 
     os.makedirs(CACHE_DIR, exist_ok=True)
-    with open(os.path.join(CACHE_DIR, "team_members.json"), "w") as f:
+    with open(os.path.join(CACHE_DIR, f"team_members_{team_id}.json"), "w") as f:
         json.dump(members, f, indent=2)
     return members
 
