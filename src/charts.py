@@ -102,24 +102,42 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis("off")
 
+    # Build table text and a parallel state matrix for cell colouring.
+    # States: "past_ok" | "future_ok" | "past_miss" | "future_none" | "weekend"
+    COLORS = {
+        "past_ok":    "#90EE90",  # lightgreen
+        "future_ok":  "#d4f5d4",  # lighter green — logged ahead of time
+        "past_miss":  "#F08080",  # lightcoral
+        "future_none":"#e8eaf0",  # light blue-gray — not yet due
+        "weekend":    "#d3d3d3",  # lightgray
+    }
+
     today = date_type.today()
-    table_data = []
+    table_data   = []
+    cell_states  = []  # parallel rows; index 0 = date column placeholder
+
     for date in table.columns:
-        row = [date.strftime("%Y-%m-%d")]
-        is_future = pd.Timestamp(date).date() > today
+        row        = [date.strftime("%Y-%m-%d")]
+        state_row  = ["_date"]
+        is_future  = pd.Timestamp(date).date() > today
+        is_weekend = pd.Timestamp(date).weekday() >= 5
+
         for member in table.index:
-            raw = table.at[member, date]
-            # Guard against duplicate member names producing a Series
+            raw   = table.at[member, date]
             hours = float(raw.sum()) if hasattr(raw, "sum") else float(raw)
-            if pd.Timestamp(date).weekday() >= 5:
-                row.append("Weekend")
+
+            if is_weekend:
+                row.append("Weekend");  state_row.append("weekend")
             elif hours > 6:
-                row.append("✓")          # logged enough — always green
+                row.append("✓")
+                state_row.append("future_ok" if is_future else "past_ok")
             elif is_future:
-                row.append("-")           # not expected yet — neutral
+                row.append("-");        state_row.append("future_none")
             else:
-                row.append("✗")           # past date, insufficient hours
+                row.append("✗");        state_row.append("past_miss")
+
         table_data.append(row)
+        cell_states.append(state_row)
 
     col_labels = ["Date"] + list(table.index)
     table_ax = ax.table(cellText=table_data, colLabels=col_labels,
@@ -129,17 +147,12 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     table_ax.auto_set_column_width(range(len(col_labels)))
 
     for (i, j), cell in table_ax.get_celld().items():
-        if i == 0 or j == 0:
+        if i == 0 or j == 0:          # header row or Date column
             cell.set_text_props(weight="bold", color="white")
             cell.set_facecolor("black")
-        elif table_data[i - 1][j] == "Weekend":
-            cell.set_facecolor("lightgray")
-        elif table_data[i - 1][j] == "✓":
-            cell.set_facecolor("lightgreen")
-        elif table_data[i - 1][j] == "✗":
-            cell.set_facecolor("lightcoral")
-        elif table_data[i - 1][j] == "-":
-            cell.set_facecolor("#e8eaf0")  # light blue-gray, neutral / not yet due
+        else:
+            state = cell_states[i - 1][j]
+            cell.set_facecolor(COLORS.get(state, "white"))
 
     plt.title("Daily Logged Hours by Team Member", fontsize=14, weight="bold", pad=8)
     table2_path = os.path.join(output_dir, "Daily_Hours_Table.png")

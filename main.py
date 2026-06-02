@@ -76,7 +76,9 @@ def main():
             print("Add the current period or use --from / --to flags.")
             sys.exit(1)
 
-    effective_to = min(today.isoformat(), period["end"])
+    # Fetch through period end so advance-logged future entries are included.
+    # The daily table chart handles future dates visually (lighter green / dash).
+    effective_to = period["end"]
 
     # --- Output setup ---
     timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
