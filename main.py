@@ -45,7 +45,7 @@ def _slug(name: str) -> str:
 
 
 def run_for_team(team_name, output_dir, timestamp, period, effective_to,
-                 credentials, log_fn):
+                 credentials, log_fn, excluded_ids=None):
     """Run the full pipeline for a single team. Returns (df, all_member_names)."""
     tempo_token, jira_base_url, jira_email, jira_token = credentials
 
@@ -55,6 +55,12 @@ def run_for_team(team_name, output_dir, timestamp, period, effective_to,
 
     log_fn("Fetching team members from Tempo...")
     api_members = tempo_client.get_team_members(tempo_token, team_id)
+    if excluded_ids:
+        before = len(api_members)
+        api_members = {k: v for k, v in api_members.items() if k not in excluded_ids}
+        removed = before - len(api_members)
+        if removed:
+            log_fn(f"Excluded {removed} member(s) by ID (see exclude_member_ids in teams.json).")
     log_fn(f"Found {len(api_members)} team members.")
 
     log_fn("Fetching user display names from Jira...")
@@ -180,9 +186,11 @@ def main():
         os.makedirs(team_output_dir, exist_ok=True)
         log(f"--- Running: {team_name} ---")
 
+        excluded_ids = set(team_cfg.get("exclude_member_ids", []))
         df, all_member_names = run_for_team(
             team_name, team_output_dir, timestamp, period,
             effective_to, credentials, log,
+            excluded_ids=excluded_ids,
         )
 
         if df is None:
