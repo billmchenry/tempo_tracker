@@ -24,7 +24,8 @@
     "hub_conversation_id": "ae57555f-6c86-43c5-9f95-84ea49b5df9a"
   },
   {
-    "name": "Marketplace"
+    "name": "Marketplace",
+    "hub_conversation_id": "836e890c-9f4f-46f0-9918-de5dc01121c5"
   },
   {
     "name": "Support AI",
@@ -36,5 +37,9 @@
   },
   {
     "name": "The Innovation Team"
+  },
+  {
+    "name": "Voice",
+    "hub_conversation_id": "5a5483a0-48a1-422b-b5c9-2fb3d5b23e32"
   }
 ]
