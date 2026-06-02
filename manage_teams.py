@@ -50,8 +50,10 @@ def cmd_list(_args):
     else:
         print(f"{len(teams)} team(s) in teams.json:")
         for i, t in enumerate(teams, 1):
+            tid     = t.get("tempo_team_id", "(not yet resolved)")
             channel = t.get("hub_conversation_id", "(no Hub channel)")
             print(f"  {i}. {t['name']}")
+            print(f"       Tempo ID:    {tid}")
             print(f"       Hub channel: {channel}")
 
 

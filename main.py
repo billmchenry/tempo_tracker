@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -21,6 +22,8 @@ load_dotenv()
 
 import config
 from src import tempo_client, jira_client, processor, charts, stats as stats_mod, hub_client
+
+_TEAMS_FILE = os.path.join(os.path.dirname(__file__), "teams.json")
 
 
 def write_log(log_path: str, message: str):
@@ -44,16 +47,19 @@ def _slug(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_")
 
 
-def run_for_team(team_name, output_dir, timestamp, period, effective_to,
+def _save_teams(teams: list):
+    """Persist teams list back to teams.json (used to cache resolved IDs)."""
+    with open(_TEAMS_FILE, "w", encoding="utf-8") as f:
+        json.dump(teams, f, indent=2)
+        f.write("\n")
+
+
+def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to,
                  credentials, log_fn):
     """Run the full pipeline for a single team. Returns (df, all_member_names)."""
     tempo_token, jira_base_url, jira_email, jira_token = credentials
 
-    log_fn(f"Looking up Tempo team: {team_name}")
-    team_id = tempo_client.get_team_id(tempo_token, team_name)
-    log_fn(f"Team ID: {team_id}")
-
-    log_fn("Fetching team members from Tempo...")
+    log_fn(f"Fetching team members for: {team_name} (ID={team_id})...")
     api_members = tempo_client.get_team_members(tempo_token, team_id)
     log_fn(f"Found {len(api_members)} team members.")
 
@@ -173,20 +179,34 @@ def main():
         log("Jira issue + user cache cleared.")
 
     credentials = (tempo_token, jira_base_url, jira_email, jira_token)
+    teams_modified = False
 
     for team_cfg in teams_to_run:
-        team_name       = team_cfg["name"]
+        team_name = team_cfg["name"]
         team_output_dir = os.path.join(output_dir, _slug(team_name))
         os.makedirs(team_output_dir, exist_ok=True)
         log(f"--- Running: {team_name} ---")
 
+        # Resolve Tempo team ID — use cached ID if available, otherwise look up by
+        # name and save it back to teams.json so future runs are rename-proof.
+        team_id = team_cfg.get("tempo_team_id")
+        if not team_id:
+            try:
+                team_id = tempo_client.get_team_id(tempo_token, team_name)
+                team_cfg["tempo_team_id"] = team_id
+                teams_modified = True
+                log(f"Resolved Tempo team ID: {team_id} (saved to teams.json).")
+            except ValueError as e:
+                log(f"WARNING: Skipping '{team_name}' — {e}")
+                continue
+
         try:
             df, all_member_names = run_for_team(
-                team_name, team_output_dir, timestamp, period,
+                team_name, team_id, team_output_dir, timestamp, period,
                 effective_to, credentials, log,
             )
-        except ValueError as e:
-            log(f"WARNING: Skipping '{team_name}' — {e}")
+        except Exception as e:
+            log(f"WARNING: '{team_name}' failed — {e}. Run continues.")
             continue
 
         if df is None:
@@ -221,6 +241,10 @@ def main():
                 log("Hub message posted successfully.")
             except Exception as e:
                 log(f"WARNING: Hub posting failed — {e}. Run continues.")
+
+    # Persist any newly resolved team IDs back to teams.json
+    if teams_modified:
+        _save_teams(config.TEMPO_TEAMS)
 
     log("All teams completed.")
     print(f"\nOutput saved to: {output_dir}")
