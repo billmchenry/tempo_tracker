@@ -4,6 +4,7 @@ from datetime import date as date_type
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 
 
 def _ensure_all_members(pivot: pd.DataFrame, all_members: list | None) -> pd.DataFrame:
@@ -35,38 +36,74 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     # -------------------------------------------------------------------------
     # Chart 1: Cumulative Capex Logged Hours Per Day
     # -------------------------------------------------------------------------
+    today_ts   = pd.Timestamp(date_type.today())
+    cutoff     = min(today_ts, end_day)   # lines extend to today (or period end)
+
     capex_df = df[df["Is Capex"] == True].copy()
     capex_df = capex_df.sort_values("Work date")
     capex_df["Cumulative Hours"] = capex_df.groupby("User name")["Logged Hours"].cumsum()
 
-    capex_chart_df = capex_df[
+    capex_period = capex_df[
         (capex_df["Work date"] >= first_day) & (capex_df["Work date"] <= end_day)
     ]
 
-    plt.figure(figsize=(12, 6))
+    # Build per-user series, extending the last known value to today
+    user_series: dict = {}
+    for name, grp in capex_period.groupby("User name"):
+        grp = grp.sort_values("Work date")
+        dates   = list(grp["Work date"])
+        cumvals = list(grp["Cumulative Hours"])
+        if dates[-1] < cutoff:          # extend line horizontally to today
+            dates.append(cutoff)
+            cumvals.append(cumvals[-1])
+        user_series[name] = (dates, cumvals)
 
-    plotted = set()
-    for name, group in capex_chart_df.groupby("User name"):
-        plt.plot(group["Work date"], group["Cumulative Hours"], label=name, marker="o", markersize=3)
-        plotted.add(name)
+    # Members with zero capex — flat line at 0 from period start to today
+    members_to_plot = sorted(all_members) if all_members else sorted(user_series.keys())
+    for m in members_to_plot:
+        if m not in user_series:
+            user_series[m] = ([first_day, cutoff], [0, 0])
 
-    # Flat zero line for members with no capex entries at all
-    if all_members:
-        for m in sorted(all_members):
-            if m not in plotted:
-                plt.plot([first_day, end_day], [0, 0], label=m, linestyle=":")
+    # Target pace line: 80 hours spread evenly over work days in the period
+    work_days   = pd.bdate_range(start=first_day, end=end_day)
+    n_work_days = len(work_days)
+    target_per_day = 80 / n_work_days if n_work_days else 0
+    target_dates  = [first_day] + list(work_days)
+    target_values = [0] + [target_per_day * (i + 1) for i in range(n_work_days)]
 
-    plt.axhline(y=80, color="r", linestyle="--", label="80 Hour Goal")
-    plt.xticks(pd.date_range(start=first_day, end=end_day, freq="W-FRI"))
-    plt.title("Cumulative Capex Logged Hours Per Day", fontsize=16, weight="bold", pad=12)
-    plt.xlabel("Date")
-    plt.ylabel("Cumulative Logged Hours")
-    plt.legend(loc="upper left")
-    plt.grid(True, alpha=0.4)
-    plt.tight_layout()
+    # --- Plot ---
+    n_series = len(members_to_plot)
+    fig, ax = plt.subplots(figsize=(13, 6))
+
+    for name in members_to_plot:
+        dates, cumvals = user_series[name]
+        ax.plot(dates, cumvals, label=name, marker="o", markersize=3, linewidth=1.8)
+
+    ax.plot(target_dates, target_values,
+            color="red", linestyle="--", linewidth=2,
+            label=f"Target pace ({n_work_days} work days → 80h)")
+
+    ax.set_xlim(first_day, end_day)
+    ax.set_xticks(pd.date_range(start=first_day, end=end_day, freq="W-FRI"))
+    ax.set_xticklabels(
+        [d.strftime("%b %d") for d in pd.date_range(start=first_day, end=end_day, freq="W-FRI")],
+        rotation=30, ha="right"
+    )
+    ax.set_title("Cumulative CapEx Logged Hours", fontsize=16, weight="bold", pad=10)
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Cumulative Logged Hours")
+    ax.grid(True, alpha=0.4)
+
+    # Legend below the chart, spread across columns
+    ncols = min(n_series + 1, 5)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
+              ncol=ncols, frameon=True, fontsize=9)
+
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.28)   # make room for legend below x-axis
 
     chart1_path = os.path.join(output_dir, "Cumulative_Capex_Hours_Chart.png")
-    plt.savefig(chart1_path, dpi=150)
+    fig.savefig(chart1_path, dpi=150, bbox_inches="tight")
     plt.close()
     log_fn(f"Cumulative Capex Chart saved to {chart1_path}.")
 
