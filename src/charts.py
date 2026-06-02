@@ -6,47 +6,67 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
+def _ensure_all_members(pivot: pd.DataFrame, all_members: list | None) -> pd.DataFrame:
+    """Add zero rows for any member in all_members not already in the index."""
+    if not all_members:
+        return pivot
+    for m in all_members:
+        if m not in pivot.index:
+            pivot.loc[m] = 0
+    return pivot.loc[sorted(all_members)]
+
+
 def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
              all_members: list | None = None):
     """Generate all 4 charts and save to output_dir.
 
     period     : {"name": str, "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
     log_fn     : callable(message) for logging
-    all_members: optional list of all team member names — ensures every member
-                 appears in charts even if they logged no hours this period
+    all_members: list of all team member first names — every member appears in
+                 every chart even if they logged no hours this period
     """
     os.makedirs(output_dir, exist_ok=True)
+
+    first_day = pd.to_datetime(period["start"])
+    end_day   = pd.to_datetime(period["end"])
+
+    df["Work date"] = pd.to_datetime(df["Work date"])
 
     # -------------------------------------------------------------------------
     # Chart 1: Cumulative Capex Logged Hours Per Day
     # -------------------------------------------------------------------------
-    df["Work date"] = pd.to_datetime(df["Work date"])
     capex_df = df[df["Is Capex"] == True].copy()
     capex_df = capex_df.sort_values("Work date")
     capex_df["Cumulative Hours"] = capex_df.groupby("User name")["Logged Hours"].cumsum()
-
-    first_day = pd.to_datetime(period["start"])
-    end_day = pd.to_datetime(period["end"])
 
     capex_chart_df = capex_df[
         (capex_df["Work date"] >= first_day) & (capex_df["Work date"] <= end_day)
     ]
 
     plt.figure(figsize=(12, 6))
+
+    plotted = set()
     for name, group in capex_chart_df.groupby("User name"):
-        plt.plot(group["Work date"], group["Cumulative Hours"], label=name)
+        plt.plot(group["Work date"], group["Cumulative Hours"], label=name, marker="o", markersize=3)
+        plotted.add(name)
+
+    # Flat zero line for members with no capex entries at all
+    if all_members:
+        for m in sorted(all_members):
+            if m not in plotted:
+                plt.plot([first_day, end_day], [0, 0], label=m, linestyle=":")
 
     plt.axhline(y=80, color="r", linestyle="--", label="80 Hour Goal")
     plt.xticks(pd.date_range(start=first_day, end=end_day, freq="W-FRI"))
-    plt.title("Daily Logged Hours by Team Member", fontsize=20, weight="bold", pad=20)
-    plt.xlabel("Date (Fridays)")
+    plt.title("Cumulative Capex Logged Hours Per Day", fontsize=16, weight="bold", pad=12)
+    plt.xlabel("Date")
     plt.ylabel("Cumulative Logged Hours")
-    plt.legend()
-    plt.grid(True)
+    plt.legend(loc="upper left")
+    plt.grid(True, alpha=0.4)
     plt.tight_layout()
 
     chart1_path = os.path.join(output_dir, "Cumulative_Capex_Hours_Chart.png")
-    plt.savefig(chart1_path)
+    plt.savefig(chart1_path, dpi=150)
     plt.close()
     log_fn(f"Cumulative Capex Chart saved to {chart1_path}.")
 
@@ -54,10 +74,7 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     # Chart 2: Daily Hours Table (✓ / ✗ / Weekend)
     # -------------------------------------------------------------------------
     df["Work_date_only"] = pd.to_datetime(df["Work_date_only"])
-    # Use full period range so every day appears, not just days with entries
-    period_start = pd.to_datetime(period["start"])
-    period_end   = pd.to_datetime(period["end"])
-    all_dates = pd.date_range(start=period_start, end=period_end)
+    all_dates = pd.date_range(start=first_day, end=end_day)
 
     daily_hours = (
         df.groupby(["Work_date_only", "User name"])["Logged Hours"]
@@ -66,7 +83,7 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     )
     daily_hours = daily_hours.reindex(index=all_dates, fill_value=0)
 
-    # Ensure every team member has a column even if they logged nothing
+    # Ensure every team member has a column
     if all_members:
         for m in all_members:
             if m not in daily_hours.columns:
@@ -77,8 +94,12 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     table.index = table.index.date
     table = table.transpose()
 
-    fig, ax = plt.subplots(figsize=(15, 15))
-    ax.axis("tight")
+    n_members = len(table.index)
+    n_dates   = len(table.columns)
+    fig_w = max(12, (n_members + 1) * 1.8)
+    fig_h = max(4,  n_dates * 0.45 + 1.2)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis("off")
 
     table_data = []
@@ -96,10 +117,10 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
 
     col_labels = ["Date"] + list(table.index)
     table_ax = ax.table(cellText=table_data, colLabels=col_labels,
-                        loc="center", cellLoc="center")
+                        cellLoc="center", bbox=[0, 0, 1, 1])
     table_ax.auto_set_font_size(False)
-    table_ax.set_fontsize(18)
-    table_ax.scale(1.5, 2)
+    table_ax.set_fontsize(11)
+    table_ax.auto_set_column_width(range(len(col_labels)))
 
     for (i, j), cell in table_ax.get_celld().items():
         if i == 0 or j == 0:
@@ -112,9 +133,9 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
         elif table_data[i - 1][j] == "✗":
             cell.set_facecolor("lightcoral")
 
-    plt.title("Daily Logged Hours by Team Member", fontsize=20, weight="bold")
+    plt.title("Daily Logged Hours by Team Member", fontsize=14, weight="bold", pad=8)
     table2_path = os.path.join(output_dir, "Daily_Hours_Table.png")
-    plt.savefig(table2_path)
+    plt.savefig(table2_path, dpi=150, bbox_inches="tight")
     plt.close()
     log_fn(f"Daily Hours Table saved to {table2_path}.")
 
@@ -130,20 +151,30 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
         .sum()
         .unstack(fill_value=0)
     )
-    capex_prop = capex_activities.div(capex_activities.sum(axis=1), axis=0)
+    capex_activities = _ensure_all_members(capex_activities, all_members)
+    # Members with 0 capex hours get a single "No CapEx logged" bar for visibility
+    zero_rows = capex_activities[capex_activities.sum(axis=1) == 0].index
+    if len(zero_rows) > 0 and "No CapEx logged" not in capex_activities.columns:
+        capex_activities["No CapEx logged"] = 0
+        capex_activities.loc[zero_rows, "No CapEx logged"] = 1  # placeholder for proportion
 
-    fig, ax = plt.subplots(figsize=(12, 7))
+    capex_prop = capex_activities.div(
+        capex_activities.sum(axis=1).replace(0, 1), axis=0
+    )
+
+    fig, ax = plt.subplots(figsize=(max(10, n_members * 1.5), 7))
     capex_prop.plot(kind="bar", stacked=True, ax=ax)
 
     plt.title("Proportion of Time Spent on Activities by User (Capex Only)",
-              fontsize=20, weight="bold")
+              fontsize=16, weight="bold")
     plt.xlabel("User Name")
     plt.ylabel("Proportion of Logged Hours")
     ax.legend().remove()
+    plt.xticks(rotation=30, ha="right")
 
     for i, container in enumerate(ax.containers):
-        epic_name = capex_prop.columns[i]
-        wrapped = wrap_text(epic_name, width=10)
+        col_name = capex_prop.columns[i]
+        wrapped = wrap_text(col_name, width=10)
         labels = []
         for rect in container:
             h = rect.get_height()
@@ -152,7 +183,7 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
 
     plt.tight_layout()
     chart3_path = os.path.join(output_dir, "Stacked_Proportion_Capex_Chart.png")
-    plt.savefig(chart3_path)
+    plt.savefig(chart3_path, dpi=150)
     plt.close()
     log_fn(f"Stacked Capex chart saved to {chart3_path}.")
 
@@ -164,16 +195,26 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
         .sum()
         .unstack(fill_value=0)
     )
-    category_prop = category_activities.div(category_activities.sum(axis=1), axis=0)
+    category_activities = _ensure_all_members(category_activities, all_members)
+    # Members with 0 hours get an "No time logged" placeholder
+    zero_rows = category_activities[category_activities.sum(axis=1) == 0].index
+    if len(zero_rows) > 0 and "No time logged" not in category_activities.columns:
+        category_activities["No time logged"] = 0
+        category_activities.loc[zero_rows, "No time logged"] = 1
 
-    fig, ax = plt.subplots(figsize=(12, 7))
+    category_prop = category_activities.div(
+        category_activities.sum(axis=1).replace(0, 1), axis=0
+    )
+
+    fig, ax = plt.subplots(figsize=(max(10, n_members * 1.5), 7))
     category_prop.plot(kind="bar", stacked=True, ax=ax)
 
     plt.title("Proportion of Time Spent on Activities by User Across Categories",
-              fontsize=20, weight="bold")
+              fontsize=16, weight="bold")
     plt.xlabel("User Name")
     plt.ylabel("Proportion of Logged Hours")
     ax.legend().remove()
+    plt.xticks(rotation=30, ha="right")
 
     for i, container in enumerate(ax.containers):
         cat_name = category_prop.columns[i]
@@ -186,6 +227,6 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
 
     plt.tight_layout()
     chart4_path = os.path.join(output_dir, "Stacked_Proportion_Category_Chart.png")
-    plt.savefig(chart4_path)
+    plt.savefig(chart4_path, dpi=150)
     plt.close()
     log_fn(f"Stacked Category chart saved to {chart4_path}.")
