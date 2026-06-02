@@ -105,16 +105,12 @@ def main():
     api_members = tempo_client.get_team_members(tempo_token, team_id)
     log(f"Found {len(api_members)} team members.")
 
-    # --- Jira: user profiles (names + timezones) ---
-    log("Fetching user profiles from Jira...")
+    # --- Jira: user display names ---
+    log("Fetching user display names from Jira...")
     account_ids   = list(api_members.keys())
     user_profiles = jira_client.get_users(account_ids, jira_base_url, jira_email, jira_token)
-
-    members        = {aid: prof["first_name"]  for aid, prof in user_profiles.items()}
-    user_timezones = {aid: prof["timezone"]    for aid, prof in user_profiles.items()}
-    log("User timezones: " + ", ".join(
-        f"{members[a]}={user_timezones[a]}" for a in members
-    ))
+    members       = {aid: prof["first_name"] for aid, prof in user_profiles.items()}
+    log("Team: " + ", ".join(sorted(members.values())))
 
     # --- Worklogs ---
     log(f"Fetching worklogs from {period['start']} to {effective_to}...")
@@ -130,7 +126,6 @@ def main():
     df = processor.process(
         worklogs=worklogs,
         members=members,
-        user_timezones=user_timezones,
         jira_base_url=jira_base_url,
         jira_email=jira_email,
         jira_token=jira_token,

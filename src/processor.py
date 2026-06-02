@@ -1,19 +1,18 @@
 import pandas as pd
 import pytz
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from src import jira_client
 
+_EST = pytz.timezone("America/New_York")
 
-def _convert_to_eastern(work_date_str: str, account_id: str, user_timezones: dict):
-    """Convert a naive work datetime string to an Eastern-time Timestamp."""
-    est = pytz.timezone("America/New_York")
-    tz_name = user_timezones.get(account_id, "UTC")
-    local_tz = pytz.timezone(tz_name)
-    dt = pd.to_datetime(work_date_str, errors="coerce")
-    if pd.isna(dt):
+
+def _utc_to_eastern(utc_str: str):
+    """Convert Tempo's startDateTimeUtc (e.g. '2026-05-01T14:00:00Z') to Eastern."""
+    if not utc_str:
         return None
-    return local_tz.localize(dt.to_pydatetime()).astimezone(est)
+    dt = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
+    return dt.astimezone(_EST)
 
 
 def _next_friday(d):
@@ -21,7 +20,7 @@ def _next_friday(d):
     return (d + timedelta(days=days_ahead)).date()
 
 
-def process(worklogs: list, members: dict, user_timezones: dict,
+def process(worklogs: list, members: dict,
             jira_base_url: str, jira_email: str, jira_token: str,
             capex_field_id: str) -> pd.DataFrame:
     """Transform raw Tempo worklogs into the processed DataFrame used by charts.
@@ -29,8 +28,7 @@ def process(worklogs: list, members: dict, user_timezones: dict,
     Parameters
     ----------
     worklogs       : raw worklog dicts from Tempo API
-    members        : {accountId: first_name} — populated from Jira user profiles
-    user_timezones : {accountId: tz_string}  — populated from Jira user profiles
+    members        : {accountId: first_name}
     jira_*         : Jira connection params for issue lookup
     capex_field_id : Jira custom field ID for Capex Project Type
     """
@@ -40,21 +38,19 @@ def process(worklogs: list, members: dict, user_timezones: dict,
     # --- Build base rows ---
     rows = []
     for wl in worklogs:
-        issue_id = str(wl["issue"]["id"])
-        account_id = wl["author"]["accountId"]
-        hours = wl["timeSpentSeconds"] / 3600
-        start_date = wl["startDate"]
-        start_time = wl.get("startTime", "00:00:00")
         rows.append({
-            "_issue_id": issue_id,
-            "Logged Hours": hours,
-            "User Account ID": account_id,
-            "Work date": f"{start_date} {start_time[:5]}",
+            "_issue_id":       str(wl["issue"]["id"]),
+            "Logged Hours":    wl["timeSpentSeconds"] / 3600,
+            "User Account ID": wl["author"]["accountId"],
+            # startDate is the user-chosen date; keep for Work date / Work week
+            "Work date":       f"{wl['startDate']} {wl.get('startTime', '00:00:00')[:5]}",
+            # startDateTimeUtc already encodes the user's timezone — use directly
+            "_utc_str":        wl.get("startDateTimeUtc", ""),
         })
 
     t = pd.DataFrame(rows)
 
-    # --- Batch-fetch all unique issues from Jira (3 requests instead of 227) ---
+    # --- Batch-fetch all unique issues from Jira ---
     unique_ids = t["_issue_id"].unique().tolist()
     print(f"  Fetching {len(unique_ids)} unique issues from Jira (batched)...")
     issue_data = jira_client.batch_get_issues(
@@ -73,9 +69,9 @@ def process(worklogs: list, members: dict, user_timezones: dict,
 
     # --- Parent Key fixup ---
     def fix_parent(row):
-        pk  = row["Parent Key"]
-        ik  = row["Issue Key"]
-        it  = str(row["Issue Type"]).lower()
+        pk   = row["Parent Key"]
+        ik   = row["Issue Key"]
+        it   = str(row["Issue Type"]).lower()
         proj = row["Project Key"]
         if (pd.isna(pk) or pk is None) and it == "epic":
             return ik
@@ -95,20 +91,16 @@ def process(worklogs: list, members: dict, user_timezones: dict,
         axis=1,
     )
 
-    # --- Time conversion to Eastern ---
-    t["Time Conversion"] = t.apply(
-        lambda row: _convert_to_eastern(row["Work date"], row["User Account ID"],
-                                        user_timezones),
-        axis=1,
+    # --- Time Conversion: use Tempo's UTC timestamp, convert to Eastern ---
+    t["Time Conversion"] = t["_utc_str"].apply(
+        lambda s: pd.Timestamp(_utc_to_eastern(s)).floor("D") if s else None
     )
-    t["Time Conversion"] = t["Time Conversion"].apply(
-        lambda dt: pd.Timestamp(dt).floor("D") if dt is not None else None
-    )
+    t.drop(columns=["_utc_str"], inplace=True)
 
-    # --- Work date columns ---
-    t["Work date"]       = pd.to_datetime(t["Work date"], errors="coerce")
-    t["Work_date_only"]  = t["Work date"].dt.date
-    t["Work week"]       = t["Work date"].apply(
+    # --- Work date columns (based on user-chosen startDate) ---
+    t["Work date"]      = pd.to_datetime(t["Work date"], errors="coerce")
+    t["Work_date_only"] = t["Work date"].dt.date
+    t["Work week"]      = t["Work date"].apply(
         lambda d: _next_friday(d) if not pd.isna(d) else None
     )
 
@@ -119,14 +111,14 @@ def process(worklogs: list, members: dict, user_timezones: dict,
 
     # --- Category ---
     t["Category"] = t.apply(
-        lambda row: "Time off"           if row["Parent Key"] == "PTO-00"
-        else ("Non project time"         if row["Parent Key"] == "TIME-00"
-        else ("Capex Project Time"       if row["Is Capex"]
+        lambda row: "Time off"            if row["Parent Key"] == "PTO-00"
+        else ("Non project time"          if row["Parent Key"] == "TIME-00"
+        else ("Capex Project Time"        if row["Is Capex"]
         else  "Non Capex Project Time")),
         axis=1,
     )
 
-    # --- User name (first name from Jira profile) ---
+    # --- User name ---
     t["User name"] = t["User Account ID"].map(members)
 
     # --- Epic enrichment: Name, Simple name, Active Project ---
@@ -135,16 +127,14 @@ def process(worklogs: list, members: dict, user_timezones: dict,
         if pk not in ("PTO-00", "TIME-00")
     ]
     print(f"  Fetching {len(unique_parents)} unique parent issues from Jira (batched)...")
-    parent_data: dict = {"PTO-00": {"summary": "", "status": ""},
-                         "TIME-00": {"summary": "", "status": ""}}
-
-    if unique_parents:
-        # Parents may already be in cache from the main batch (if they were logged directly)
-        # get_issue() hits cache first, only calls API on miss
-        for pk in unique_parents:
-            parent_data[pk] = jira_client.get_issue(
-                pk, jira_base_url, jira_email, jira_token, capex_field_id
-            )
+    parent_data: dict = {
+        "PTO-00":  {"summary": "", "status": ""},
+        "TIME-00": {"summary": "", "status": ""},
+    }
+    for pk in unique_parents:
+        parent_data[pk] = jira_client.get_issue(
+            pk, jira_base_url, jira_email, jira_token, capex_field_id
+        )
 
     t["Name"] = t["Parent Key"].map(
         lambda pk: parent_data.get(pk, {}).get("summary", "") if pk else ""

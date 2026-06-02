@@ -284,18 +284,14 @@ def get_users(account_ids: list, base_url: str, email: str, token: str) -> dict:
         if resp.status_code != 200:
             profile = {
                 "display_name": account_id,
-                "first_name": account_id[:8],
-                "timezone": "UTC",
+                "first_name":   account_id[:8],
             }
         else:
             data = resp.json()
             display_name = data.get("displayName", account_id)
-            first_name = _extract_first_name(display_name)
-            timezone = data.get("timeZone", "UTC")
             profile = {
                 "display_name": display_name,
-                "first_name": first_name,
-                "timezone": timezone,
+                "first_name":   _extract_first_name(display_name),
             }
 
         _user_cache[account_id] = profile
