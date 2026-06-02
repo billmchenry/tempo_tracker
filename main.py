@@ -180,10 +180,14 @@ def main():
         os.makedirs(team_output_dir, exist_ok=True)
         log(f"--- Running: {team_name} ---")
 
-        df, all_member_names = run_for_team(
-            team_name, team_output_dir, timestamp, period,
-            effective_to, credentials, log,
-        )
+        try:
+            df, all_member_names = run_for_team(
+                team_name, team_output_dir, timestamp, period,
+                effective_to, credentials, log,
+            )
+        except ValueError as e:
+            log(f"WARNING: Skipping '{team_name}' — {e}")
+            continue
 
         if df is None:
             continue
