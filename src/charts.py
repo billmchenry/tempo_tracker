@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
+import config
+
 
 def _ensure_all_members(pivot: pd.DataFrame, all_members: list | None) -> pd.DataFrame:
     """Add zero rows for any member in all_members not already in the index."""
@@ -67,7 +69,7 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     # Target pace line: 80 hours spread evenly over work days in the period
     work_days   = pd.bdate_range(start=first_day, end=end_day)
     n_work_days = len(work_days)
-    target_per_day = 80 / n_work_days if n_work_days else 0
+    target_per_day = config.CAPEX_TARGET_HOURS / n_work_days if n_work_days else 0
     target_dates  = [first_day] + list(work_days)
     target_values = [0] + [target_per_day * (i + 1) for i in range(n_work_days)]
 
@@ -81,7 +83,7 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
 
     ax.plot(target_dates, target_values,
             color="red", linestyle="--", linewidth=2,
-            label=f"Target pace ({n_work_days} work days → 80h)")
+            label=f"Target pace ({n_work_days} work days → {config.CAPEX_TARGET_HOURS}h)")
 
     ax.set_xlim(first_day, end_day)
     ax.set_xticks(pd.date_range(start=first_day, end=end_day, freq="W-FRI"))
@@ -165,7 +167,7 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
 
             if is_weekend:
                 row.append("Weekend");  state_row.append("weekend")
-            elif hours > 6:
+            elif hours > config.DAILY_HOURS_THRESHOLD:
                 row.append("✓")
                 state_row.append("future_ok" if is_future else "past_ok")
             elif is_future:

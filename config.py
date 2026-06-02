@@ -7,6 +7,30 @@ with open(_teams_file, encoding="utf-8") as _f:
 
 OUTPUT_BASE = r"G:\My Drive\Tempo"
 
+# ── Reporting thresholds ──────────────────────────────────────────────────────
+# Change these once and every chart label + Hub message updates automatically.
+DAILY_HOURS_THRESHOLD = 6   # ✓ in Daily Hours Table requires > this many hours
+CAPEX_TARGET_HOURS    = 80  # target CapEx hours per team member per period
+
+# ── Hub messaging ─────────────────────────────────────────────────────────────
+HUB_BASE_URL = "https://oklnqysblyswhbfxurby.supabase.co/functions/v1/hub-api"
+
+HUB_MESSAGE_HEADER = (
+    "{team_name} — CapEx progress report as of {run_timestamp}.\n"
+    "Period: {period_start} → {capex_end_date} ({days_remaining} calendar days remaining). "
+    "Remember, CapEx period ends on {capex_end_date}.\n"
+)
+
+HUB_MESSAGE_FOOTER = (
+    "---\n"
+    "CapEx hours = all hours logged to CapEx-eligible Jira issues this period. "
+    "Target: {capex_target_hours}h (reduced proportionally for any weekday PTO logged).\n"
+    "On track = current pace projects to meeting the (PTO-adjusted) target by period end.\n"
+    "Days not reported = weekdays (Mon–Fri) from period start through today with zero hours logged.\n"
+    "All times are Eastern. Team members in earlier time zones (e.g. India IST) who log "
+    "after midnight local time will have those hours counted on the previous Eastern calendar day."
+)
+
 # 2026 CapEx reporting periods (Start Day → Cut Off Day).
 # main.py auto-selects the period where today falls.
 # Add future years here as needed.

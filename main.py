@@ -5,6 +5,7 @@ Usage:
     python main.py --team "Agent Experience Product Team"
     python main.py --from 2025-12-27 --to 2026-01-23
     python main.py --refresh-cache   # clears Jira issue + user cache
+    python main.py --no-hub          # skip posting to Hub (preview MD still written)
 """
 
 import argparse
@@ -12,13 +13,14 @@ import os
 import re
 import sys
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 import config
-from src import tempo_client, jira_client, processor, charts
+from src import tempo_client, jira_client, processor, charts, stats as stats_mod, hub_client
 
 
 def write_log(log_path: str, message: str):
@@ -44,7 +46,7 @@ def _slug(name: str) -> str:
 
 def run_for_team(team_name, output_dir, timestamp, period, effective_to,
                  credentials, log_fn):
-    """Run the full pipeline for a single team, writing output to output_dir."""
+    """Run the full pipeline for a single team. Returns (df, all_member_names)."""
     tempo_token, jira_base_url, jira_email, jira_token = credentials
 
     log_fn(f"Looking up Tempo team: {team_name}")
@@ -67,7 +69,7 @@ def run_for_team(team_name, output_dir, timestamp, period, effective_to,
 
     if not worklogs:
         log_fn("No worklogs found for this period. Nothing to report.")
-        return
+        return None, []
 
     log_fn("Processing worklogs...")
     df = processor.process(
@@ -89,6 +91,7 @@ def run_for_team(team_name, output_dir, timestamp, period, effective_to,
     charts.generate(df, output_dir, period, log_fn, all_members=all_member_names)
 
     log_fn(f"Team '{team_name}' completed successfully.")
+    return df, all_member_names
 
 
 def main():
@@ -98,6 +101,8 @@ def main():
     parser.add_argument("--to",        dest="to_date",   help="Override end date YYYY-MM-DD")
     parser.add_argument("--refresh-cache", action="store_true",
                         help="Clear Jira issue + user cache before running")
+    parser.add_argument("--no-hub", action="store_true",
+                        help="Skip posting to Hub (Hub_Message_Preview.md is still written)")
     args = parser.parse_args()
 
     # --- Credentials ---
@@ -116,6 +121,8 @@ def main():
         print(f"ERROR: Missing environment variables: {', '.join(missing)}")
         print("Copy .env.example to .env and fill in the values.")
         sys.exit(1)
+
+    hub_api_key = os.environ.get("HUB_API_KEY", "").strip()
 
     # --- Teams ---
     if not config.TEMPO_TEAMS:
@@ -168,12 +175,48 @@ def main():
     credentials = (tempo_token, jira_base_url, jira_email, jira_token)
 
     for team_cfg in teams_to_run:
-        team_name = team_cfg["name"]
+        team_name       = team_cfg["name"]
         team_output_dir = os.path.join(output_dir, _slug(team_name))
         os.makedirs(team_output_dir, exist_ok=True)
         log(f"--- Running: {team_name} ---")
-        run_for_team(team_name, team_output_dir, timestamp, period,
-                     effective_to, credentials, log)
+
+        df, all_member_names = run_for_team(
+            team_name, team_output_dir, timestamp, period,
+            effective_to, credentials, log,
+        )
+
+        if df is None:
+            continue
+
+        # --- Hub message (always preview to MD; post live if key is available) ---
+        eastern        = ZoneInfo("America/New_York")
+        run_ts         = datetime.now(eastern).strftime("%Y-%m-%d %H:%M ET")
+        days_remaining = (date.fromisoformat(period["end"]) - today).days
+
+        team_stats, elapsed = stats_mod.compute_team_stats(df, period, all_member_names)
+        message = hub_client.build_message(
+            team_name, run_ts, period, days_remaining, team_stats, elapsed
+        )
+
+        # Write preview MD — always, so you can review before the API key is set
+        preview_path = os.path.join(team_output_dir, "Hub_Message_Preview.md")
+        with open(preview_path, "w", encoding="utf-8") as f:
+            f.write(f"# Hub Message Preview\n\n```\n{message}\n```\n")
+        log(f"Hub message preview saved to {preview_path}.")
+
+        conv_id = team_cfg.get("hub_conversation_id", "")
+        if args.no_hub:
+            log("Hub posting skipped (--no-hub).")
+        elif not hub_api_key:
+            log("Hub posting skipped (HUB_API_KEY not set in .env).")
+        elif not conv_id:
+            log("Hub posting skipped (no hub_conversation_id in teams.json).")
+        else:
+            try:
+                hub_client.post_message(hub_api_key, conv_id, message)
+                log("Hub message posted successfully.")
+            except Exception as e:
+                log(f"WARNING: Hub posting failed — {e}. Run continues.")
 
     log("All teams completed.")
     print(f"\nOutput saved to: {output_dir}")
