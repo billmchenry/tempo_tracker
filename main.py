@@ -2,8 +2,8 @@
 
 Usage:
     python main.py
-    python main.py --from 2025-04-01 --to 2025-06-30
-    python main.py --refresh-cache
+    python main.py --from 2025-12-27 --to 2026-01-23
+    python main.py --refresh-cache   # clears Jira issue + user cache
 """
 
 import argparse
@@ -39,22 +39,22 @@ def find_active_period(today: date) -> dict | None:
 def main():
     parser = argparse.ArgumentParser(description="Tempo reporting dashboard")
     parser.add_argument("--from", dest="from_date", help="Override start date YYYY-MM-DD")
-    parser.add_argument("--to", dest="to_date", help="Override end date YYYY-MM-DD")
+    parser.add_argument("--to",   dest="to_date",   help="Override end date YYYY-MM-DD")
     parser.add_argument("--refresh-cache", action="store_true",
-                        help="Clear the Jira issue cache before running")
+                        help="Clear Jira issue + user cache before running")
     args = parser.parse_args()
 
     # --- Credentials ---
-    tempo_token = os.environ.get("TEMPO_TOKEN", "").strip()
+    tempo_token   = os.environ.get("TEMPO_TOKEN",   "").strip()
     jira_base_url = os.environ.get("JIRA_BASE_URL", "").strip().rstrip("/")
-    jira_email = os.environ.get("JIRA_EMAIL", "").strip()
-    jira_token = os.environ.get("JIRA_TOKEN", "").strip()
+    jira_email    = os.environ.get("JIRA_EMAIL",    "").strip()
+    jira_token    = os.environ.get("JIRA_TOKEN",    "").strip()
 
     missing = [k for k, v in {
-        "TEMPO_TOKEN": tempo_token,
+        "TEMPO_TOKEN":   tempo_token,
         "JIRA_BASE_URL": jira_base_url,
-        "JIRA_EMAIL": jira_email,
-        "JIRA_TOKEN": jira_token,
+        "JIRA_EMAIL":    jira_email,
+        "JIRA_TOKEN":    jira_token,
     }.items() if not v]
     if missing:
         print(f"ERROR: Missing environment variables: {', '.join(missing)}")
@@ -65,48 +65,56 @@ def main():
     today = date.today()
     if args.from_date and args.to_date:
         period = {
-            "name": f"Custom {args.from_date} to {args.to_date}",
+            "name":  f"Custom {args.from_date} to {args.to_date}",
             "start": args.from_date,
-            "end": args.to_date,
+            "end":   args.to_date,
         }
     else:
         period = find_active_period(today)
         if not period:
-            print(f"ERROR: Today ({today}) doesn't fall in any CAPEX_PERIODS defined in config.py.")
-            print("Add the current period to CAPEX_PERIODS or use --from / --to flags.")
+            print(f"ERROR: Today ({today}) doesn't fall in any CAPEX_PERIODS in config.py.")
+            print("Add the current period or use --from / --to flags.")
             sys.exit(1)
 
-    # Pull worklogs up to today (not necessarily to period end)
     effective_to = min(today.isoformat(), period["end"])
 
     # --- Output setup ---
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(config.OUTPUT_BASE, f"Tempo_{timestamp}_final")
     os.makedirs(output_dir, exist_ok=True)
-    log_path = os.path.join(output_dir, f"Tempo_log_{timestamp}.txt")
+    log_path   = os.path.join(output_dir, f"Tempo_log_{timestamp}.txt")
 
     def log(msg):
         write_log(log_path, msg)
 
     log("Script started.")
-    log(f"Period: {period['name']} ({period['start']} → {effective_to})")
+    log(f"Period: {period['name']} ({period['start']} to {effective_to})")
 
-    # --- Optional cache refresh ---
     if args.refresh_cache:
         jira_client.clear_cache()
-        log("Jira issue cache cleared.")
+        log("Jira issue + user cache cleared.")
 
     # --- Tempo: team + worklogs ---
     log(f"Looking up Tempo team: {config.TEMPO_TEAM_NAME}")
     team_id = tempo_client.get_team_id(tempo_token, config.TEMPO_TEAM_NAME)
     log(f"Team ID: {team_id}")
 
-    log("Fetching team members...")
+    log("Fetching team members from Tempo...")
     api_members = tempo_client.get_team_members(tempo_token, team_id)
-    # Merge with static fallback so known members always have short display names
-    members = {**api_members, **config.STATIC_TEAM_MEMBERS}
-    log(f"Team members: {list(members.values())}")
+    log(f"Found {len(api_members)} team members.")
 
+    # --- Jira: user profiles (names + timezones) ---
+    log("Fetching user profiles from Jira...")
+    account_ids   = list(api_members.keys())
+    user_profiles = jira_client.get_users(account_ids, jira_base_url, jira_email, jira_token)
+
+    members        = {aid: prof["first_name"]  for aid, prof in user_profiles.items()}
+    user_timezones = {aid: prof["timezone"]    for aid, prof in user_profiles.items()}
+    log("User timezones: " + ", ".join(
+        f"{members[a]}={user_timezones[a]}" for a in members
+    ))
+
+    # --- Worklogs ---
     log(f"Fetching worklogs from {period['start']} to {effective_to}...")
     worklogs = tempo_client.get_worklogs(tempo_token, team_id, period["start"], effective_to)
     log(f"Retrieved {len(worklogs)} worklogs.")
@@ -120,7 +128,7 @@ def main():
     df = processor.process(
         worklogs=worklogs,
         members=members,
-        user_timezones=config.USER_TIMEZONES,
+        user_timezones=user_timezones,
         jira_base_url=jira_base_url,
         jira_email=jira_email,
         jira_token=jira_token,
@@ -128,14 +136,14 @@ def main():
     )
     log(f"Processed {len(df)} rows.")
 
-    # Save processed CSV
     csv_path = os.path.join(output_dir, f"Processed_Tempo_{timestamp}.csv")
     df.to_csv(csv_path, index=False)
     log(f"Processed CSV saved to {csv_path}.")
 
     # --- Charts ---
     log("Generating charts...")
-    charts.generate(df, output_dir, period, log)
+    all_member_names = sorted(members.values())
+    charts.generate(df, output_dir, period, log, all_members=all_member_names)
 
     log("Script completed successfully.")
     print(f"\nOutput saved to: {output_dir}")

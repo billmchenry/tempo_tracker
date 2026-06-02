@@ -1,15 +1,14 @@
 import pandas as pd
 import pytz
-from datetime import timedelta, datetime
+from datetime import timedelta
 
 from src import jira_client
 
 
-def _convert_to_eastern(work_date_str: str, account_id: str,
-                         user_timezones: dict):
+def _convert_to_eastern(work_date_str: str, account_id: str, user_timezones: dict):
     """Convert a naive work datetime string to an Eastern-time Timestamp."""
     est = pytz.timezone("America/New_York")
-    tz_name = user_timezones.get(account_id, "Asia/Kolkata")
+    tz_name = user_timezones.get(account_id, "UTC")
     local_tz = pytz.timezone(tz_name)
     dt = pd.to_datetime(work_date_str, errors="coerce")
     if pd.isna(dt):
@@ -18,7 +17,6 @@ def _convert_to_eastern(work_date_str: str, account_id: str,
 
 
 def _next_friday(d):
-    """Return the date of the next Friday (inclusive of today if Friday)."""
     days_ahead = (4 - d.weekday()) % 7
     return (d + timedelta(days=days_ahead)).date()
 
@@ -31,57 +29,53 @@ def process(worklogs: list, members: dict, user_timezones: dict,
     Parameters
     ----------
     worklogs       : raw worklog dicts from Tempo API
-    members        : {accountId: displayName}
-    user_timezones : {accountId: tz_string}; unlisted accounts default to IST
+    members        : {accountId: first_name} — populated from Jira user profiles
+    user_timezones : {accountId: tz_string}  — populated from Jira user profiles
     jira_*         : Jira connection params for issue lookup
     capex_field_id : Jira custom field ID for Capex Project Type
     """
     if not worklogs:
         return pd.DataFrame()
 
-    # --- Build base rows from Tempo worklogs ---
+    # --- Build base rows ---
     rows = []
     for wl in worklogs:
-        issue_id = str(wl["issue"]["id"])   # numeric Jira ID
+        issue_id = str(wl["issue"]["id"])
         account_id = wl["author"]["accountId"]
         hours = wl["timeSpentSeconds"] / 3600
-        start_date = wl["startDate"]            # "YYYY-MM-DD"
-        start_time = wl.get("startTime", "00:00:00")  # "HH:MM:SS"
-        work_date_str = f"{start_date} {start_time[:5]}"  # "YYYY-MM-DD HH:MM"
+        start_date = wl["startDate"]
+        start_time = wl.get("startTime", "00:00:00")
         rows.append({
             "_issue_id": issue_id,
             "Logged Hours": hours,
             "User Account ID": account_id,
-            "Work date": work_date_str,
+            "Work date": f"{start_date} {start_time[:5]}",
         })
 
     t = pd.DataFrame(rows)
 
-    # --- Resolve every unique issue ID via Jira (cached) ---
-    unique_ids = t["_issue_id"].unique()
-    print(f"  Fetching {len(unique_ids)} unique issues from Jira...")
-    issue_data = {}
-    for issue_id in unique_ids:
-        issue_data[issue_id] = jira_client.get_issue(
-            issue_id, jira_base_url, jira_email, jira_token, capex_field_id
-        )
+    # --- Batch-fetch all unique issues from Jira (3 requests instead of 227) ---
+    unique_ids = t["_issue_id"].unique().tolist()
+    print(f"  Fetching {len(unique_ids)} unique issues from Jira (batched)...")
+    issue_data = jira_client.batch_get_issues(
+        unique_ids, jira_base_url, jira_email, jira_token, capex_field_id
+    )
 
-    # Map issue fields onto DataFrame
-    t["Issue Key"] = t["_issue_id"].map(lambda i: issue_data[i]["key"])
-    t["Full name"] = t["User Account ID"].map(members).fillna("")
-    t["Issue Type"] = t["_issue_id"].map(lambda i: issue_data[i]["type"])
-    t["Project Key"] = t["_issue_id"].map(lambda i: issue_data[i]["project_key"])
-    t["Project Name"] = t["_issue_id"].map(lambda i: issue_data[i]["project_name"])
-    t["Issue Status"] = t["_issue_id"].map(lambda i: issue_data[i]["status"])
+    t["Issue Key"]          = t["_issue_id"].map(lambda i: issue_data[i]["key"])
+    t["Full name"]          = t["User Account ID"].map(members).fillna("")
+    t["Issue Type"]         = t["_issue_id"].map(lambda i: issue_data[i]["type"])
+    t["Project Key"]        = t["_issue_id"].map(lambda i: issue_data[i]["project_key"])
+    t["Project Name"]       = t["_issue_id"].map(lambda i: issue_data[i]["project_name"])
+    t["Issue Status"]       = t["_issue_id"].map(lambda i: issue_data[i]["status"])
     t["Capex Project Type"] = t["_issue_id"].map(lambda i: issue_data[i]["capex_type"])
-    t["Parent Key"] = t["_issue_id"].map(lambda i: issue_data[i]["parent_key"])
+    t["Parent Key"]         = t["_issue_id"].map(lambda i: issue_data[i]["parent_key"])
     t.drop(columns=["_issue_id"], inplace=True)
 
     # --- Parent Key fixup ---
     def fix_parent(row):
-        pk = row["Parent Key"]
-        ik = row["Issue Key"]
-        it = str(row["Issue Type"]).lower()
+        pk  = row["Parent Key"]
+        ik  = row["Issue Key"]
+        it  = str(row["Issue Type"]).lower()
         proj = row["Project Key"]
         if (pd.isna(pk) or pk is None) and it == "epic":
             return ik
@@ -112,9 +106,9 @@ def process(worklogs: list, members: dict, user_timezones: dict,
     )
 
     # --- Work date columns ---
-    t["Work date"] = pd.to_datetime(t["Work date"], errors="coerce")
-    t["Work_date_only"] = t["Work date"].dt.date
-    t["Work week"] = t["Work date"].apply(
+    t["Work date"]       = pd.to_datetime(t["Work date"], errors="coerce")
+    t["Work_date_only"]  = t["Work date"].dt.date
+    t["Work week"]       = t["Work date"].apply(
         lambda d: _next_friday(d) if not pd.isna(d) else None
     )
 
@@ -125,27 +119,32 @@ def process(worklogs: list, members: dict, user_timezones: dict,
 
     # --- Category ---
     t["Category"] = t.apply(
-        lambda row: "Time off" if row["Parent Key"] == "PTO-00"
-        else ("Non project time" if row["Parent Key"] == "TIME-00"
-              else ("Capex Project Time" if row["Is Capex"]
-                    else "Non Capex Project Time")),
+        lambda row: "Time off"           if row["Parent Key"] == "PTO-00"
+        else ("Non project time"         if row["Parent Key"] == "TIME-00"
+        else ("Capex Project Time"       if row["Is Capex"]
+        else  "Non Capex Project Time")),
         axis=1,
     )
 
-    # --- User name (short display name) ---
+    # --- User name (first name from Jira profile) ---
     t["User name"] = t["User Account ID"].map(members)
 
     # --- Epic enrichment: Name, Simple name, Active Project ---
-    unique_parents = t["Parent Key"].dropna().unique()
-    print(f"  Fetching {len(unique_parents)} unique parent issues from Jira...")
-    parent_data = {}
-    for pk in unique_parents:
-        if pk in ("PTO-00", "TIME-00"):
-            parent_data[pk] = {"key": pk, "summary": "", "status": ""}
-            continue
-        parent_data[pk] = jira_client.get_issue(
-            pk, jira_base_url, jira_email, jira_token, capex_field_id
-        )
+    unique_parents = [
+        pk for pk in t["Parent Key"].dropna().unique()
+        if pk not in ("PTO-00", "TIME-00")
+    ]
+    print(f"  Fetching {len(unique_parents)} unique parent issues from Jira (batched)...")
+    parent_data: dict = {"PTO-00": {"summary": "", "status": ""},
+                         "TIME-00": {"summary": "", "status": ""}}
+
+    if unique_parents:
+        # Parents may already be in cache from the main batch (if they were logged directly)
+        # get_issue() hits cache first, only calls API on miss
+        for pk in unique_parents:
+            parent_data[pk] = jira_client.get_issue(
+                pk, jira_base_url, jira_email, jira_token, capex_field_id
+            )
 
     t["Name"] = t["Parent Key"].map(
         lambda pk: parent_data.get(pk, {}).get("summary", "") if pk else ""

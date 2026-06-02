@@ -6,11 +6,14 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn):
+def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
+             all_members: list | None = None):
     """Generate all 4 charts and save to output_dir.
 
-    period: {"name": str, "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
-    log_fn: callable(message) for logging
+    period     : {"name": str, "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+    log_fn     : callable(message) for logging
+    all_members: optional list of all team member names — ensures every member
+                 appears in charts even if they logged no hours this period
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -51,9 +54,10 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn):
     # Chart 2: Daily Hours Table (✓ / ✗ / Weekend)
     # -------------------------------------------------------------------------
     df["Work_date_only"] = pd.to_datetime(df["Work_date_only"])
-    min_date = df["Work_date_only"].min()
-    max_date = df["Work_date_only"].max()
-    all_dates = pd.date_range(start=min_date, end=max_date)
+    # Use full period range so every day appears, not just days with entries
+    period_start = pd.to_datetime(period["start"])
+    period_end   = pd.to_datetime(period["end"])
+    all_dates = pd.date_range(start=period_start, end=period_end)
 
     daily_hours = (
         df.groupby(["Work_date_only", "User name"])["Logged Hours"]
@@ -61,6 +65,13 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn):
         .unstack(fill_value=0)
     )
     daily_hours = daily_hours.reindex(index=all_dates, fill_value=0)
+
+    # Ensure every team member has a column even if they logged nothing
+    if all_members:
+        for m in all_members:
+            if m not in daily_hours.columns:
+                daily_hours[m] = 0
+        daily_hours = daily_hours[sorted(all_members)]
 
     table = daily_hours.copy()
     table.index = table.index.date
