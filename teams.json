@@ -26,7 +26,8 @@
     "name": "Marketplace"
   },
   {
-    "name": "Support AI"
+    "name": "Support AI",
+    "hub_conversation_id": "a85e7090-859e-4044-8018-ebd3bc53cbfd"
   },
   {
     "name": "Survey AI"
