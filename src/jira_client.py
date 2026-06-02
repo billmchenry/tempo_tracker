@@ -303,6 +303,20 @@ def get_users(account_ids: list, base_url: str, email: str, token: str) -> dict:
         time.sleep(0.05)  # small delay between user lookups
 
     _save_user_cache()
+
+    # Deduplicate first names: if two members share a first name, append last initial
+    seen: dict = {}  # first_name -> account_id of first occurrence
+    for aid, prof in result.items():
+        fn = prof["first_name"]
+        if fn in seen:
+            # Disambiguate both entries with last initial
+            for dup_aid in (seen[fn], aid):
+                parts = result[dup_aid]["display_name"].split()
+                if len(parts) > 1:
+                    result[dup_aid]["first_name"] = f"{parts[0]} {parts[-1][0]}."
+        else:
+            seen[fn] = aid
+
     return result
 
 

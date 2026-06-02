@@ -1,6 +1,6 @@
 import os
 import textwrap
-from datetime import timedelta
+from datetime import date as date_type
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -102,17 +102,23 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis("off")
 
+    today = date_type.today()
     table_data = []
     for date in table.columns:
         row = [date.strftime("%Y-%m-%d")]
+        is_future = pd.Timestamp(date).date() > today
         for member in table.index:
-            hours = table.at[member, date]
+            raw = table.at[member, date]
+            # Guard against duplicate member names producing a Series
+            hours = float(raw.sum()) if hasattr(raw, "sum") else float(raw)
             if pd.Timestamp(date).weekday() >= 5:
                 row.append("Weekend")
             elif hours > 6:
-                row.append("✓")
+                row.append("✓")          # logged enough — always green
+            elif is_future:
+                row.append("-")           # not expected yet — neutral
             else:
-                row.append("✗")
+                row.append("✗")           # past date, insufficient hours
         table_data.append(row)
 
     col_labels = ["Date"] + list(table.index)
@@ -132,6 +138,8 @@ def generate(df: pd.DataFrame, output_dir: str, period: dict, log_fn,
             cell.set_facecolor("lightgreen")
         elif table_data[i - 1][j] == "✗":
             cell.set_facecolor("lightcoral")
+        elif table_data[i - 1][j] == "-":
+            cell.set_facecolor("#e8eaf0")  # light blue-gray, neutral / not yet due
 
     plt.title("Daily Logged Hours by Team Member", fontsize=14, weight="bold", pad=8)
     table2_path = os.path.join(output_dir, "Daily_Hours_Table.png")
