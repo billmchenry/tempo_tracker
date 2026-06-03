@@ -8,7 +8,7 @@ import config
 
 
 def _count_holidays_in(holidays: set, start: pd.Timestamp, end: pd.Timestamp) -> int:
-    """Count FIXED holiday dates that fall on weekdays within [start, end]."""
+    """Count holiday dates that fall on weekdays within [start, end]."""
     count = 0
     for d_str in holidays:
         d = pd.Timestamp(d_str)
@@ -80,7 +80,7 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list,
             ["Logged Hours"].sum()
         )
 
-        # Per-member holiday adjustment — subtract FIXED holidays from each window
+        # Per-member holiday adjustment — subtract scheme holidays from each window
         member_holidays = holidays_by_member.get(member, set())
         h_total     = _count_holidays_in(member_holidays, period_start, period_end)
         h_elapsed   = _count_holidays_in(member_holidays, period_start, cutoff)

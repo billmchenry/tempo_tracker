@@ -60,15 +60,11 @@ def get_user_holiday_scheme(token: str, account_id: str) -> dict | None:
 
 
 def get_holidays_for_scheme(token: str, scheme_id: int, year: int) -> set:
-    """Return set of FIXED holiday dates (YYYY-MM-DD) for a scheme and year."""
+    """Return set of all holiday dates (YYYY-MM-DD) for a scheme and year."""
     url = f"{TEMPO_BASE}/holiday-schemes/{scheme_id}/holidays?year={year}"
     resp = requests.get(url, headers=_headers(token))
     resp.raise_for_status()
-    return {
-        h["date"]
-        for h in resp.json().get("results", [])
-        if h.get("type") == "FIXED"
-    }
+    return {h["date"] for h in resp.json().get("results", [])}
 
 
 def get_worklogs(token: str, team_id: str, from_date: str, to_date: str) -> list:
