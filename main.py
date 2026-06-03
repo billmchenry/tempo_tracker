@@ -97,8 +97,13 @@ def _fetch_holidays_by_member(tempo_token: str, account_ids: dict, inaccessible_
                     dates.update(tempo_client.get_holidays_for_scheme(tempo_token, scheme_id, yr))
                 scheme_cache[scheme_id] = dates
             holidays_by_member[name] = scheme_cache[scheme_id]
+            in_period = sorted(
+                d for d in scheme_cache[scheme_id]
+                if period["start"] <= d <= period["end"]
+            )
             log_fn(f"  {name}: scheme '{scheme_name}' — "
-                   f"{len(scheme_cache[scheme_id])} fixed holidays across {list(years)}.")
+                   f"{len(scheme_cache[scheme_id])} fixed holidays across {list(years)}. "
+                   f"In period: {in_period if in_period else 'none'}.")
         except Exception as exc:
             log_fn(f"  WARNING: Could not fetch holiday scheme for {name} — {exc}")
 
