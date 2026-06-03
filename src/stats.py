@@ -7,17 +7,20 @@ import pandas as pd
 import config
 
 
-def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list) -> tuple:
+def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list,
+                       inaccessible_members: set = None) -> tuple:
     """Return (stats_list, elapsed_work_days).
 
     stats_list: one dict per member (sorted by name):
         name, capex_hours, on_track, daily_ok, days_not_reported,
-        reporting_work_days, elapsed_work_days, pto_hours, adjusted_target
+        reporting_work_days, elapsed_work_days, pto_hours, adjusted_target,
+        inaccessible (True when the member's logs could not be accessed)
 
     elapsed_work_days  : working days period-start → today (for header display)
     reporting_work_days: working days period-start → yesterday (daily check
                          excludes today — team may not have logged yet)
     """
+    inaccessible_members = inaccessible_members or set()
     today     = date.today()
     yesterday = today - timedelta(days=1)
 
@@ -39,6 +42,21 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list) -> tup
 
     stats = []
     for member in sorted(all_members):
+        if member in inaccessible_members:
+            stats.append({
+                "name":                member,
+                "inaccessible":        True,
+                "capex_hours":         0.0,
+                "on_track":            False,
+                "daily_ok":            False,
+                "days_not_reported":   0,
+                "reporting_work_days": reporting_work_days,
+                "elapsed_work_days":   elapsed_work_days,
+                "pto_hours":           0.0,
+                "adjusted_target":     float(config.CAPEX_TARGET_HOURS),
+            })
+            continue
+
         mdf = df[df["User name"] == member]
 
         capex_hours = float(mdf[mdf["Is Capex"] == True]["Logged Hours"].sum())

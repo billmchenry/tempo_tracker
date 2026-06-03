@@ -275,7 +275,11 @@ def get_users(account_ids: list, base_url: str, email: str, token: str) -> dict:
 
     for account_id in account_ids:
         if account_id in _user_cache:
-            result[account_id] = _user_cache[account_id]
+            cached = _user_cache[account_id]
+            # Back-fill accessible flag for entries written before this field existed
+            if "accessible" not in cached:
+                cached["accessible"] = True
+            result[account_id] = cached
             continue
 
         url = f"{base_url}/rest/api/3/user?accountId={account_id}"
@@ -285,6 +289,7 @@ def get_users(account_ids: list, base_url: str, email: str, token: str) -> dict:
             profile = {
                 "display_name": account_id,
                 "first_name":   account_id[:8],
+                "accessible":   False,
             }
         else:
             data = resp.json()
@@ -292,6 +297,7 @@ def get_users(account_ids: list, base_url: str, email: str, token: str) -> dict:
             profile = {
                 "display_name": display_name,
                 "first_name":   _extract_first_name(display_name),
+                "accessible":   True,
             }
 
         _user_cache[account_id] = profile

@@ -6,6 +6,8 @@ import config
 
 
 def _daily_str(s: dict) -> str:
+    if s.get("inaccessible"):
+        return "- could not access logs"
     n     = s["days_not_reported"]
     total = s["reporting_work_days"]
     if total == 0:

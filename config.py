@@ -15,6 +15,9 @@ CAPEX_TARGET_HOURS    = 80  # target CapEx hours per team member per period
 # ── Hub messaging ─────────────────────────────────────────────────────────────
 HUB_BASE_URL = "https://oklnqysblyswhbfxurby.supabase.co/functions/v1/hub-api"
 
+# Local/staging override: all messages go here when not running in GitHub Actions
+STAGING_CONVERSATION_ID = "4f908a49-822c-4a3f-be96-9450b7f1e698"
+
 HUB_MESSAGE_HEADER = (
     "{team_name} — CapEx progress report as of {run_timestamp}.\n"
     "Period: {period_start} → {capex_end_date} ({days_remaining} calendar days remaining). "

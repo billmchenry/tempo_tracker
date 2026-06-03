@@ -68,10 +68,11 @@ def _save_teams(teams: list):
 
 
 def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to,
-                 credentials, log_fn, ci_mode=False):
-    """Run the full pipeline for a single team. Returns (df, all_member_names).
+                 credentials, log_fn, ci_mode=False, inaccessible_config=None):
+    """Run the full pipeline for a single team. Returns (df, all_member_names, inaccessible_names).
 
-    ci_mode: when True, skips CSV and chart generation (no file I/O).
+    inaccessible_config: list of first names (from teams.json) whose Tempo logs
+                         are known to be inaccessible to the API token.
     """
     tempo_token, jira_base_url, jira_email, jira_token = credentials
 
@@ -82,7 +83,26 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
     log_fn("Fetching user display names from Jira...")
     account_ids   = list(api_members.keys())
     user_profiles = jira_client.get_users(account_ids, jira_base_url, jira_email, jira_token)
-    members       = {aid: prof["first_name"] for aid, prof in user_profiles.items()}
+
+    # For inaccessible accounts, use Tempo display name so we get a real name in the report
+    for aid, prof in user_profiles.items():
+        if not prof.get("accessible", True):
+            tempo_display = api_members.get(aid, "")
+            if tempo_display:
+                parts = tempo_display.split()
+                prof["first_name"] = parts[0].capitalize() if parts else prof["first_name"]
+
+    members = {aid: prof["first_name"] for aid, prof in user_profiles.items()}
+
+    # Jira-profile failures + explicitly configured Tempo-inaccessible members
+    inaccessible_names = {
+        prof["first_name"]
+        for aid, prof in user_profiles.items()
+        if not prof.get("accessible", True)
+    } | set(inaccessible_config or [])
+
+    if inaccessible_names:
+        log_fn(f"Inaccessible members (logs cannot be retrieved): {', '.join(sorted(inaccessible_names))}")
     log_fn("Team: " + ", ".join(sorted(members.values())))
 
     log_fn(f"Fetching worklogs from {period['start']} to {effective_to}...")
@@ -91,7 +111,7 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
 
     if not worklogs:
         log_fn("No worklogs found for this period. Nothing to report.")
-        return None, []
+        return None, [], inaccessible_names
 
     log_fn("Processing worklogs...")
     df = processor.process(
@@ -104,20 +124,20 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
     )
     log_fn(f"Processed {len(df)} rows.")
 
+    all_member_names = sorted(members.values())
+
     if not ci_mode:
         csv_path = os.path.join(output_dir, f"Processed_Tempo_{timestamp}.csv")
         df.to_csv(csv_path, index=False)
         log_fn(f"Processed CSV saved to {csv_path}.")
 
         log_fn("Generating charts...")
-        all_member_names = sorted(members.values())
         charts.generate(df, output_dir, period, log_fn, all_members=all_member_names)
     else:
-        all_member_names = sorted(members.values())
         log_fn("CI mode: skipping CSV and chart generation.")
 
     log_fn(f"Team '{team_name}' completed successfully.")
-    return df, all_member_names
+    return df, all_member_names, inaccessible_names
 
 
 def main():
@@ -233,9 +253,10 @@ def main():
                 continue
 
         try:
-            df, all_member_names = run_for_team(
+            df, all_member_names, inaccessible_names = run_for_team(
                 team_name, team_id, team_output_dir, timestamp, period,
                 effective_to, credentials, log, ci_mode=CI_MODE,
+                inaccessible_config=team_cfg.get("inaccessible_members", []),
             )
         except Exception as e:
             log(f"WARNING: '{team_name}' failed — {e}. Run continues.")
@@ -245,37 +266,47 @@ def main():
             continue
 
         # --- Hub message ---
-        eastern        = ZoneInfo("America/New_York")
-        run_ts         = datetime.now(eastern).strftime("%Y-%m-%d %H:%M ET")
-        days_remaining = (date.fromisoformat(period["end"]) - today).days
+        try:
+            eastern        = ZoneInfo("America/New_York")
+            run_ts         = datetime.now(eastern).strftime("%Y-%m-%d %H:%M ET")
+            days_remaining = (date.fromisoformat(period["end"]) - today).days
 
-        team_stats, elapsed = stats_mod.compute_team_stats(df, period, all_member_names)
-        message = hub_client.build_message(
-            team_name, run_ts, period, days_remaining, team_stats, elapsed
-        )
+            team_stats, elapsed = stats_mod.compute_team_stats(
+                df, period, all_member_names, inaccessible_members=inaccessible_names
+            )
+            message = hub_client.build_message(
+                team_name, run_ts, period, days_remaining, team_stats, elapsed
+            )
 
-        if CI_MODE:
-            # No file system — log the message to the Actions console instead
-            log(f"Hub message preview:\n{message}")
-        else:
-            preview_path = os.path.join(team_output_dir, "Hub_Message_Preview.md")
-            with open(preview_path, "w", encoding="utf-8") as f:
-                f.write(f"# Hub Message Preview\n\n```\n{message}\n```\n")
-            log(f"Hub message preview saved to {preview_path}.")
+            if CI_MODE:
+                log(f"Hub message preview:\n{message}")
+            else:
+                preview_path = os.path.join(team_output_dir, "Hub_Message_Preview.md")
+                with open(preview_path, "w", encoding="utf-8") as f:
+                    f.write(f"# Hub Message Preview\n\n```\n{message}\n```\n")
+                log(f"Hub message preview saved to {preview_path}.")
 
-        conv_id = team_cfg.get("hub_conversation_id", "")
-        if args.no_hub:
-            log("Hub posting skipped (--no-hub).")
-        elif not hub_api_key:
-            log("Hub posting skipped (HUB_API_KEY not set in .env).")
-        elif not conv_id:
-            log("Hub posting skipped (no hub_conversation_id in teams.json).")
-        else:
-            try:
-                hub_client.post_message(hub_api_key, conv_id, message)
-                log("Hub message posted successfully.")
-            except Exception as e:
-                log(f"WARNING: Hub posting failed — {e}. Run continues.")
+            # Local runs → staging channel; CI runs → individual team channel
+            if not CI_MODE:
+                conv_id = config.STAGING_CONVERSATION_ID
+                log(f"Local run: routing Hub message to staging channel.")
+            else:
+                conv_id = team_cfg.get("hub_conversation_id", "")
+
+            if args.no_hub:
+                log("Hub posting skipped (--no-hub).")
+            elif not hub_api_key:
+                log("Hub posting skipped (HUB_API_KEY not set in .env).")
+            elif not conv_id:
+                log("Hub posting skipped (no hub_conversation_id in teams.json).")
+            else:
+                try:
+                    hub_client.post_message(hub_api_key, conv_id, message)
+                    log("Hub message posted successfully.")
+                except Exception as e:
+                    log(f"WARNING: Hub posting failed — {e}. Run continues.")
+        except Exception as e:
+            log(f"WARNING: Hub message for '{team_name}' failed — {e}. Run continues.")
 
     # Persist any newly resolved team IDs — only meaningful in local mode
     if teams_modified and not CI_MODE:
