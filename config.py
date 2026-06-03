@@ -27,7 +27,7 @@ HUB_MESSAGE_HEADER = (
 HUB_MESSAGE_FOOTER = (
     "---\n"
     "\n"
-    "Information about this report\n"
+    "*Information about this report*\n"
     "\n"
     f"• Every weekday must have at least {DAILY_HOURS_THRESHOLD}h logged, regardless if it is CapEx time or not.\n"
     "\n"
