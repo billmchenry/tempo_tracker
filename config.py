@@ -26,7 +26,7 @@ HUB_MESSAGE_HEADER = (
 
 HUB_MESSAGE_FOOTER = (
     "---\n"
-    "Every weekday must have at least some time logged (any project, not just CapEx). "
+    f"Every weekday must have more than {DAILY_HOURS_THRESHOLD}h logged (any project, not just CapEx). "
     "Today is excluded — the team may not have entered time yet. "
     "All times are Eastern. Team members in earlier time zones (e.g. India IST) who log "
     "after midnight local time will have those hours counted on the previous Eastern calendar day."
