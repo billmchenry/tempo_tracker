@@ -49,6 +49,28 @@ def get_team_members(token: str, team_id: str) -> dict:
     return members
 
 
+def get_user_holiday_scheme(token: str, account_id: str) -> dict | None:
+    """Return the Tempo holiday scheme for a user, or None if not found."""
+    url = f"{TEMPO_BASE}/holiday-schemes/users/{account_id}"
+    resp = requests.get(url, headers=_headers(token))
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_holidays_for_scheme(token: str, scheme_id: int, year: int) -> set:
+    """Return set of FIXED holiday dates (YYYY-MM-DD) for a scheme and year."""
+    url = f"{TEMPO_BASE}/holiday-schemes/{scheme_id}/holidays?year={year}"
+    resp = requests.get(url, headers=_headers(token))
+    resp.raise_for_status()
+    return {
+        h["date"]
+        for h in resp.json().get("results", [])
+        if h.get("type") == "FIXED"
+    }
+
+
 def get_worklogs(token: str, team_id: str, from_date: str, to_date: str) -> list:
     """Return all worklogs for a team between from_date and to_date (YYYY-MM-DD).
 

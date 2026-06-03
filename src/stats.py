@@ -7,8 +7,19 @@ import pandas as pd
 import config
 
 
+def _count_holidays_in(holidays: set, start: pd.Timestamp, end: pd.Timestamp) -> int:
+    """Count FIXED holiday dates that fall on weekdays within [start, end]."""
+    count = 0
+    for d_str in holidays:
+        d = pd.Timestamp(d_str)
+        if start <= d <= end and d.dayofweek < 5:
+            count += 1
+    return count
+
+
 def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list,
-                       inaccessible_members: set = None) -> tuple:
+                       inaccessible_members: set = None,
+                       holidays_by_member: dict = None) -> tuple:
     """Return (stats_list, elapsed_work_days).
 
     stats_list: one dict per member (sorted by name):
@@ -21,6 +32,7 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list,
                          excludes today — team may not have logged yet)
     """
     inaccessible_members = inaccessible_members or set()
+    holidays_by_member   = holidays_by_member or {}
     today     = date.today()
     yesterday = today - timedelta(days=1)
 
@@ -68,18 +80,30 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list,
             ["Logged Hours"].sum()
         )
 
+        # Per-member holiday adjustment — subtract FIXED holidays from each window
+        member_holidays = holidays_by_member.get(member, set())
+        h_total     = _count_holidays_in(member_holidays, period_start, period_end)
+        h_elapsed   = _count_holidays_in(member_holidays, period_start, cutoff)
+        h_remaining = _count_holidays_in(member_holidays, tomorrow, period_end)
+        h_reporting = _count_holidays_in(member_holidays, period_start, report_cutoff)
+
+        m_total_work_days     = total_work_days - h_total
+        m_elapsed_work_days   = elapsed_work_days - h_elapsed
+        m_remaining_work_days = remaining_work_days - h_remaining
+        m_reporting_work_days = reporting_work_days - h_reporting
+
         # Days logged through yesterday only
         past = mdf[pd.to_datetime(mdf["Work_date_only"]) <= pd.Timestamp(yesterday)]
         days_reported     = int(past["Work_date_only"].nunique())
-        days_not_reported = max(0, reporting_work_days - days_reported)
+        days_not_reported = max(0, m_reporting_work_days - days_reported)
 
-        pace      = capex_hours / elapsed_work_days if elapsed_work_days > 0 else 0.0
-        projected = capex_hours + pace * remaining_work_days
+        pace      = capex_hours / m_elapsed_work_days if m_elapsed_work_days > 0 else 0.0
+        projected = capex_hours + pace * m_remaining_work_days
 
         pto_days        = pto_hours / 8
         adjusted_target = (
-            config.CAPEX_TARGET_HOURS * (total_work_days - pto_days) / total_work_days
-            if total_work_days > 0 else float(config.CAPEX_TARGET_HOURS)
+            config.CAPEX_TARGET_HOURS * (m_total_work_days - pto_days) / m_total_work_days
+            if m_total_work_days > 0 else float(config.CAPEX_TARGET_HOURS)
         )
 
         stats.append({
@@ -88,10 +112,11 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list,
             "on_track":            projected >= adjusted_target,
             "daily_ok":            days_not_reported == 0,
             "days_not_reported":   days_not_reported,
-            "reporting_work_days": reporting_work_days,
-            "elapsed_work_days":   elapsed_work_days,
+            "reporting_work_days": m_reporting_work_days,
+            "elapsed_work_days":   m_elapsed_work_days,
             "pto_hours":           round(pto_hours, 1),
             "adjusted_target":     round(adjusted_target, 1),
+            "holiday_days":        h_total,
         })
 
     return stats, elapsed_work_days

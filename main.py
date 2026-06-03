@@ -67,6 +67,44 @@ def _save_teams(teams: list):
         f.write("\n")
 
 
+def _fetch_holidays_by_member(tempo_token: str, account_ids: dict, inaccessible_names: set,
+                              period: dict, log_fn) -> dict:
+    """Return {first_name: set_of_holiday_date_strings} for each accessible member.
+
+    Deduplicates API calls — members sharing a scheme make only one /holidays request.
+    Only FIXED holidays are included (floating holidays are employee-choice PTO).
+    """
+    start_year = int(period["start"][:4])
+    end_year   = int(period["end"][:4])
+    years      = range(start_year, end_year + 1)
+
+    scheme_cache: dict = {}   # scheme_id -> set of date strings
+    holidays_by_member: dict = {}
+
+    for aid, name in account_ids.items():
+        if name in inaccessible_names:
+            continue
+        try:
+            scheme = tempo_client.get_user_holiday_scheme(tempo_token, aid)
+            if not scheme:
+                log_fn(f"  {name}: no holiday scheme found.")
+                continue
+            scheme_id   = scheme["id"]
+            scheme_name = scheme.get("name", str(scheme_id))
+            if scheme_id not in scheme_cache:
+                dates: set = set()
+                for yr in years:
+                    dates.update(tempo_client.get_holidays_for_scheme(tempo_token, scheme_id, yr))
+                scheme_cache[scheme_id] = dates
+            holidays_by_member[name] = scheme_cache[scheme_id]
+            log_fn(f"  {name}: scheme '{scheme_name}' — "
+                   f"{len(scheme_cache[scheme_id])} fixed holidays across {list(years)}.")
+        except Exception as exc:
+            log_fn(f"  WARNING: Could not fetch holiday scheme for {name} — {exc}")
+
+    return holidays_by_member
+
+
 def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to,
                  credentials, log_fn, ci_mode=False, inaccessible_config=None):
     """Run the full pipeline for a single team. Returns (df, all_member_names, inaccessible_names).
@@ -111,7 +149,7 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
 
     if not worklogs:
         log_fn("No worklogs found for this period. Nothing to report.")
-        return None, [], inaccessible_names
+        return None, [], inaccessible_names, holidays_by_member
 
     log_fn("Processing worklogs...")
     df = processor.process(
@@ -126,6 +164,11 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
 
     all_member_names = sorted(members.values())
 
+    log_fn("Fetching holiday schemes...")
+    holidays_by_member = _fetch_holidays_by_member(
+        tempo_token, members, inaccessible_names, period, log_fn
+    )
+
     if not ci_mode:
         csv_path = os.path.join(output_dir, f"Processed_Tempo_{timestamp}.csv")
         df.to_csv(csv_path, index=False)
@@ -137,7 +180,7 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
         log_fn("CI mode: skipping CSV and chart generation.")
 
     log_fn(f"Team '{team_name}' completed successfully.")
-    return df, all_member_names, inaccessible_names
+    return df, all_member_names, inaccessible_names, holidays_by_member
 
 
 def main():
@@ -253,7 +296,7 @@ def main():
                 continue
 
         try:
-            df, all_member_names, inaccessible_names = run_for_team(
+            df, all_member_names, inaccessible_names, holidays_by_member = run_for_team(
                 team_name, team_id, team_output_dir, timestamp, period,
                 effective_to, credentials, log, ci_mode=CI_MODE,
                 inaccessible_config=team_cfg.get("inaccessible_members", []),
@@ -272,8 +315,13 @@ def main():
             days_remaining = (date.fromisoformat(period["end"]) - today).days
 
             team_stats, elapsed = stats_mod.compute_team_stats(
-                df, period, all_member_names, inaccessible_members=inaccessible_names
+                df, period, all_member_names,
+                inaccessible_members=inaccessible_names,
+                holidays_by_member=holidays_by_member,
             )
+            for s in team_stats:
+                if s.get("holiday_days", 0) > 0:
+                    log(f"  {s['name']}: {s['holiday_days']} holiday day(s) excluded from expected hours.")
             message = hub_client.build_message(
                 team_name, run_ts, period, days_remaining, team_stats, elapsed
             )
