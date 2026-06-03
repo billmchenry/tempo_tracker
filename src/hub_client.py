@@ -37,7 +37,7 @@ def build_message(team_name: str, run_date: str, period: dict,
         lines.append(f"  {_daily_str(s)}")
         lines.append("")
 
-    lines.append(config.HUB_MESSAGE_FOOTER)
+    lines.extend(config.HUB_MESSAGE_FOOTER.splitlines())
     return "\n".join(lines)
 
 
