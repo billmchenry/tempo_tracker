@@ -19,18 +19,17 @@ def _daily_str(s: dict) -> str:
     return f"✗ {n} of {total} days missed"
 
 
-def build_message(team_name: str, run_timestamp: str, period: dict,
-                  days_remaining: int, stats: list, elapsed_work_days: int) -> str:
+def build_message(team_name: str, run_date: str, period: dict,
+                  stats: list) -> str:
     """Format the full plain-text Hub progress message."""
     lines = [
         config.HUB_MESSAGE_HEADER.format(
             team_name=team_name,
-            run_timestamp=run_timestamp,
+            run_date=run_date,
             period_start=period["start"],
             capex_end_date=period["end"],
-            days_remaining=days_remaining,
         ),
-        f"TEAM PROGRESS ({elapsed_work_days} working days elapsed):\n",
+        "*TEAM PROGRESS:*\n",
     ]
 
     for s in stats:

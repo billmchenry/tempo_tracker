@@ -315,9 +315,8 @@ def main():
 
         # --- Hub message ---
         try:
-            eastern        = ZoneInfo("America/New_York")
-            run_ts         = datetime.now(eastern).strftime("%Y-%m-%d %H:%M ET")
-            days_remaining = (date.fromisoformat(period["end"]) - today).days
+            eastern  = ZoneInfo("America/New_York")
+            run_date = datetime.now(eastern).strftime("%Y-%m-%d")
 
             team_stats, elapsed = stats_mod.compute_team_stats(
                 df, period, all_member_names,
@@ -328,7 +327,7 @@ def main():
                 if s.get("holiday_days", 0) > 0:
                     log(f"  {s['name']}: {s['holiday_days']} holiday day(s) excluded from expected hours.")
             message = hub_client.build_message(
-                team_name, run_ts, period, days_remaining, team_stats, elapsed
+                team_name, run_date, period, team_stats
             )
 
             if CI_MODE:

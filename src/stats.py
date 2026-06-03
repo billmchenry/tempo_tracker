@@ -95,7 +95,7 @@ def compute_team_stats(df: pd.DataFrame, period: dict, all_members: list,
         # Days meeting the daily hours threshold, through yesterday only
         past = mdf[pd.to_datetime(mdf["Work_date_only"]) <= pd.Timestamp(yesterday)]
         daily_totals  = past.groupby("Work_date_only")["Logged Hours"].sum()
-        days_reported = int((daily_totals > config.DAILY_HOURS_THRESHOLD).sum())
+        days_reported = int((daily_totals >= config.DAILY_HOURS_THRESHOLD).sum())
         days_not_reported = max(0, m_reporting_work_days - days_reported)
 
         pace      = capex_hours / m_elapsed_work_days if m_elapsed_work_days > 0 else 0.0
