@@ -20,15 +20,21 @@ STAGING_CONVERSATION_ID = "4f908a49-822c-4a3f-be96-9450b7f1e698"
 
 HUB_MESSAGE_HEADER = (
     "*{team_name} - CapEx Progress Report as of {run_date}*\n"
-    "Period: {period_start} → {capex_end_date}\n"
+    "\n"
+    "Period: {period_start} → {capex_end_date}"
 )
 
 HUB_MESSAGE_FOOTER = (
     "---\n"
+    "\n"
     "Information about this report\n"
+    "\n"
     f"• Every weekday must have at least {DAILY_HOURS_THRESHOLD}h logged, regardless if it is CapEx time or not.\n"
+    "\n"
     "• Team members in earlier time zones (e.g. India IST) who log after midnight local time will have those hours counted on the previous calendar day.\n"
+    "\n"
     "• Tempo is aware of US holidays (it shows red in Tempo) - team members do not need to enter holidays if Tempo is aware. If Tempo is not aware, please log as TIME2-1 for eight hours.\n"
+    "\n"
     "• If you are anticipating time off, please enter it in Tempo prior to time off."
 )
 

@@ -22,19 +22,21 @@ def _daily_str(s: dict) -> str:
 def build_message(team_name: str, run_date: str, period: dict,
                   stats: list) -> str:
     """Format the full plain-text Hub progress message."""
-    lines = [
-        config.HUB_MESSAGE_HEADER.format(
-            team_name=team_name,
-            run_date=run_date,
-            period_start=period["start"],
-            capex_end_date=period["end"],
-        ),
-        "*TEAM PROGRESS:*\n",
-    ]
+    lines = []
+
+    lines.extend(config.HUB_MESSAGE_HEADER.format(
+        team_name=team_name,
+        run_date=run_date,
+        period_start=period["start"],
+        capex_end_date=period["end"],
+    ).splitlines())
+
+    lines.append("")
+    lines.append("*TEAM PROGRESS:*")
+    lines.append("")
 
     for s in stats:
-        lines.append(f"• {s['name']}")
-        lines.append(f"  {_daily_str(s)}")
+        lines.append(f"• {s['name']}  {_daily_str(s)}")
         lines.append("")
 
     lines.extend(config.HUB_MESSAGE_FOOTER.splitlines())
