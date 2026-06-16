@@ -48,5 +48,65 @@
     "name": "The Innovation Team",
     "hub_conversation_id": "5a5483a0-48a1-422b-b5c9-2fb3d5b23e32",
     "tempo_team_id": "43"
+  },
+  {
+    "name": "eXpand/ICON Team",
+    "hub_conversation_id": "2971eb03-1812-4f52-b991-44193b492daf",
+    "tempo_team_id": "72"
+  },
+  {
+    "name": "Pluto",
+    "hub_conversation_id": "33306020-cdd0-4571-a873-b92414993c34",
+    "tempo_team_id": "67"
+  },
+  {
+    "name": "Accounting Ops1 IMS AS",
+    "hub_conversation_id": "b5d3ac1a-ac11-4885-9605-99e1061f9778",
+    "tempo_team_id": "68"
+  },
+  {
+    "name": "PUP Circle",
+    "hub_conversation_id": "102d8078-e019-47af-8323-ba631ece2cdd",
+    "tempo_team_id": "69"
+  },
+  {
+    "name": "Platform Team",
+    "hub_conversation_id": "140de252-a9ca-479f-b424-f6e02517a370",
+    "tempo_team_id": "13"
+  },
+  {
+    "name": "International Team",
+    "hub_conversation_id": "e3fd5b7f-395c-4d1d-acaf-528121a7942d",
+    "tempo_team_id": "20"
+  },
+  {
+    "name": "Brokerage Operations Team 1",
+    "hub_conversation_id": "f8888baf-c90b-47dc-ab12-f5f7bd25f5b6",
+    "tempo_team_id": "14"
+  },
+  {
+    "name": "IRSS Team",
+    "hub_conversation_id": "6ce53bc7-5659-428f-813b-4dfeec69e9e7",
+    "tempo_team_id": "10"
+  },
+  {
+    "name": "Transactions",
+    "hub_conversation_id": "f8878c5b-b01e-4745-8745-ef7aa7b54d4b",
+    "tempo_team_id": "17"
+  },
+  {
+    "name": "Transactions Re-Imagined (DealDesk)",
+    "hub_conversation_id": "ad05b3f8-1fea-4eaa-b5ef-d1db1d93b0f2",
+    "tempo_team_id": "62"
+  },
+  {
+    "name": "Deal Desk Canada",
+    "hub_conversation_id": "7ff89439-b767-47b5-9ed5-73c43751115e",
+    "tempo_team_id": "70"
+  },
+  {
+    "name": "JeX Team",
+    "hub_conversation_id": "4a759626-8952-4bd2-ab9a-56bf9e096dd7",
+    "tempo_team_id": "71"
   }
 ]
