@@ -22,6 +22,7 @@ HUB_MESSAGE_HEADER = (
     "*{team_name} - CapEx Progress Report as of {run_date}*\n"
     "\n"
     "CapEx Period Start: {period_start}\n"
+    "\n"
     "*CapEx Period End: {capex_end_date}*"
 )
 
