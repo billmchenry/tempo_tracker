@@ -2,7 +2,7 @@ name: Tempo CapEx Report
 
 on:
   schedule:
-    - cron: '0 10 * * 5'  # 4am MDT Fridays (UTC-6); drifts to 3am MST (UTC-7) in winter
+    - cron: '0 7 * * 5'  # targets ~4am MDT (10am UTC); scheduled early to compensate for GitHub's typical 2-3h delay on Fridays
   workflow_dispatch:          # manual trigger from GitHub Actions UI
 
 jobs:
