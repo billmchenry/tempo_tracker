@@ -22,7 +22,7 @@ def _next_friday(d):
 
 def process(worklogs: list, members: dict,
             jira_base_url: str, jira_email: str, jira_token: str,
-            capex_field_id: str) -> pd.DataFrame:
+            capex_field_id: str, ci_mode: bool = False) -> pd.DataFrame:
     """Transform raw Tempo worklogs into the processed DataFrame used by charts.
 
     Parameters
@@ -49,6 +49,16 @@ def process(worklogs: list, members: dict,
         })
 
     t = pd.DataFrame(rows)
+
+    # --- CI fast path: skip all Jira enrichment (not needed for daily check) ---
+    if ci_mode:
+        t["User name"] = t["User Account ID"].map(members)
+        t["Work date"] = pd.to_datetime(t["Work date"], errors="coerce")
+        t["Work_date_only"] = t["Work date"].dt.date
+        t["Is Capex"] = False
+        t["Category"] = ""
+        t.drop(columns=["_utc_str"], inplace=True)
+        return t
 
     # --- Batch-fetch all unique issues from Jira ---
     unique_ids = t["_issue_id"].unique().tolist()

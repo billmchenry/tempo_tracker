@@ -68,21 +68,35 @@ def _save_teams(teams: list):
 
 
 def _fetch_holidays_by_member(tempo_token: str, account_ids: dict, inaccessible_names: set,
-                              period: dict, log_fn) -> dict:
+                              period: dict, log_fn,
+                              scheme_cache: dict | None = None,
+                              member_holidays: dict | None = None) -> dict:
     """Return {first_name: set_of_holiday_date_strings} for each accessible member.
 
     Deduplicates API calls — members sharing a scheme make only one /holidays request.
     Only FIXED holidays are included (floating holidays are employee-choice PTO).
+
+    scheme_cache  : shared across teams; keyed by scheme_id → set of date strings
+    member_holidays: shared across teams; keyed by first_name → set of date strings.
+                     Members already present are returned immediately without an API call.
     """
+    if scheme_cache is None:
+        scheme_cache = {}
+    if member_holidays is None:
+        member_holidays = {}
+
     start_year = int(period["start"][:4])
     end_year   = int(period["end"][:4])
     years      = range(start_year, end_year + 1)
 
-    scheme_cache: dict = {}   # scheme_id -> set of date strings
     holidays_by_member: dict = {}
 
     for aid, name in account_ids.items():
         if name in inaccessible_names:
+            continue
+        # Already fetched on a prior team — skip the API call entirely
+        if name in member_holidays:
+            holidays_by_member[name] = member_holidays[name]
             continue
         try:
             scheme = tempo_client.get_user_holiday_scheme(tempo_token, aid)
@@ -97,6 +111,7 @@ def _fetch_holidays_by_member(tempo_token: str, account_ids: dict, inaccessible_
                     dates.update(tempo_client.get_holidays_for_scheme(tempo_token, scheme_id, yr))
                 scheme_cache[scheme_id] = dates
             holidays_by_member[name] = scheme_cache[scheme_id]
+            member_holidays[name] = scheme_cache[scheme_id]
             in_period = sorted(
                 d for d in scheme_cache[scheme_id]
                 if period["start"] <= d <= period["end"]
@@ -111,7 +126,8 @@ def _fetch_holidays_by_member(tempo_token: str, account_ids: dict, inaccessible_
 
 
 def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to,
-                 credentials, log_fn, ci_mode=False, inaccessible_config=None):
+                 credentials, log_fn, ci_mode=False, inaccessible_config=None,
+                 scheme_cache=None, member_holidays=None):
     """Run the full pipeline for a single team. Returns (df, all_member_names, inaccessible_names).
 
     inaccessible_config: list of first names (from teams.json) whose Tempo logs
@@ -164,6 +180,7 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
         jira_email=jira_email,
         jira_token=jira_token,
         capex_field_id=config.JIRA_CAPEX_FIELD_ID,
+        ci_mode=ci_mode,
     )
     log_fn(f"Processed {len(df)} rows.")
 
@@ -171,7 +188,9 @@ def run_for_team(team_name, team_id, output_dir, timestamp, period, effective_to
 
     log_fn("Fetching holiday schemes...")
     holidays_by_member = _fetch_holidays_by_member(
-        tempo_token, members, inaccessible_names, period, log_fn
+        tempo_token, members, inaccessible_names, period, log_fn,
+        scheme_cache=scheme_cache,
+        member_holidays=member_holidays,
     )
 
     if not ci_mode:
@@ -277,6 +296,9 @@ def main():
     credentials   = (tempo_token, jira_base_url, jira_email, jira_token)
     teams_modified = False
 
+    shared_scheme_cache:   dict = {}
+    shared_member_holidays: dict = {}
+
     for team_cfg in teams_to_run:
         team_name = team_cfg["name"]
         log(f"--- Running: {team_name} ---")
@@ -305,6 +327,8 @@ def main():
                 team_name, team_id, team_output_dir, timestamp, period,
                 effective_to, credentials, log, ci_mode=CI_MODE,
                 inaccessible_config=team_cfg.get("inaccessible_members", []),
+                scheme_cache=shared_scheme_cache,
+                member_holidays=shared_member_holidays,
             )
         except Exception as e:
             log(f"WARNING: '{team_name}' failed — {e}. Run continues.")
