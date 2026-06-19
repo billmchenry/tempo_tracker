@@ -21,7 +21,8 @@ STAGING_CONVERSATION_ID = "4f908a49-822c-4a3f-be96-9450b7f1e698"
 HUB_MESSAGE_HEADER = (
     "*{team_name} - CapEx Progress Report as of {run_date}*\n"
     "\n"
-    "Period: {period_start} → {capex_end_date}"
+    "CapEx Period Start: {period_start}\n"
+    "*CapEx Period End: {capex_end_date}*"
 )
 
 HUB_MESSAGE_FOOTER = (
