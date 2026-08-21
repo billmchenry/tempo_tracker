@@ -1,0 +1,29 @@
+name: CapEx/Component Field Audit
+
+on:
+  schedule:
+    - cron: '0 11 * * 1-4'  # 7:00 AM Eastern (EDT/UTC-4), Monday-Thursday
+                            # Note: cron doesn't shift for DST — this runs 6:00 AM Eastern during EST (winter).
+  workflow_dispatch:         # manual trigger from GitHub Actions UI
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run CapEx/Component audit
+        env:
+          JIRA_BASE_URL:  ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL:     ${{ secrets.JIRA_EMAIL }}
+          CAPEX_TRACKER:  ${{ secrets.CAPEX_TRACKER }}
+          HUB_API_KEY:    ${{ secrets.HUB_API_KEY }}
+        run: python capex_component_audit.py

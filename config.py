@@ -60,3 +60,30 @@ CAPEX_PERIODS = [
 
 # Jira custom field ID for "Capex Project Type"
 JIRA_CAPEX_FIELD_ID = "customfield_11300"
+
+# ── CapEx/Component field audit ───────────────────────────────────────────────
+# Flags "Agent Experience" tickets missing CapEx Project Type and/or Component,
+# routed to the reporting Circle's Hub channel.
+CAPEX_COMPONENT_AUDIT_JQL = (
+    'project = "Agent Experience" AND ('
+    '"Capex Project Type[Dropdown]" is EMPTY OR component is EMPTY'
+    ') AND status not in (Cancelled, Duplicate, "Not a Bug", "Cannot Reproduce", Backlog, "To Do") '
+    'AND type not in (Epic, Sub-task)'
+)
+
+
+def _hub_channel_for_team(team_name: str) -> str | None:
+    return next((t["hub_conversation_id"] for t in TEMPO_TEAMS if t["name"] == team_name), None)
+
+
+# Circle label ("Circle1".."Circle4") -> Hub channel, reusing the conversation
+# IDs already assigned to each Circle's team in teams.json.
+CIRCLE_HUB_CHANNELS = {
+    "1": _hub_channel_for_team("Agent Experience Circle 1"),
+    "2": _hub_channel_for_team("Agent Experience Circle 2"),
+    "3": _hub_channel_for_team("Agent Experience Circle 3"),
+    "4": _hub_channel_for_team("Agent Platform- Circle 4"),
+}
+
+# Tickets with no Circle label, or more than one, go here for manual triage.
+FALLBACK_HUB_CHANNEL = _hub_channel_for_team("Agent Experience Product Team")

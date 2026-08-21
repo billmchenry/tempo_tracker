@@ -322,6 +322,90 @@ def get_users(account_ids: list, base_url: str, email: str, token: str) -> dict:
     return result
 
 
+# --------------------------------------------------------------------------- #
+# Generic JQL search (audit jobs — not tied to a fixed field list)
+# --------------------------------------------------------------------------- #
+
+def _parse_audit_fields(issue: dict, capex_field_id: str) -> dict:
+    """Extract the fields needed for the CapEx/Component audit job."""
+    f = issue["fields"]
+    reporter = f.get("reporter") or {}
+    assignee = f.get("assignee") or {}
+    return {
+        "key": issue["key"],
+        "summary": f.get("summary", ""),
+        "reporter": reporter.get("displayName", "Unknown"),
+        "assignee": assignee.get("displayName", "Unassigned"),
+        "labels": f.get("labels") or [],
+        "capex_type": _parse_capex(f.get(capex_field_id)),
+        "components": [c.get("name", "") for c in (f.get("components") or [])],
+    }
+
+
+def search_issues(jql: str, fields: list, base_url: str, email: str, token: str,
+                   capex_field_id: str, max_pages: int = 20) -> list:
+    """Run an arbitrary JQL query and return a list of parsed issue dicts.
+
+    Paginates via nextPageToken against the Cloud /search/jql endpoint (the
+    same endpoint batch_get_issues() uses, but here the caller supplies the
+    JQL and field list instead of a fixed id-in-(...) lookup). max_pages is a
+    runaway guard, not an expected limit — 20 pages * 100 results covers any
+    realistic audit query.
+    """
+    session = _make_session(email, token)
+    search_url = _gateway_url(base_url, "/rest/api/3/search/jql")
+    issues = []
+    next_token = None
+    page = 0
+
+    while page < max_pages:
+        payload = {"jql": jql, "fields": fields, "maxResults": BATCH_SIZE}
+        if next_token:
+            payload["nextPageToken"] = next_token
+
+        resp = session.post(search_url, json=payload)
+        resp.raise_for_status()
+        body = resp.json()
+        issues.extend(body.get("issues", []))
+
+        page += 1
+        next_token = body.get("nextPageToken")
+        if not next_token:
+            break
+
+    return [_parse_audit_fields(issue, capex_field_id) for issue in issues]
+
+
+def get_cloud_id(base_url: str) -> str:
+    """Resolve the Atlassian Cloud ID for a site (no auth required).
+
+    API tokens *with scopes* (unlike classic full-access tokens) are rejected
+    by the site's own https://{site}/rest/api/3/... domain — they only work
+    through the https://api.atlassian.com/ex/jira/{cloudId}/... gateway.
+    """
+    resp = requests.get(f"{base_url}/_edge/tenant_info")
+    resp.raise_for_status()
+    return resp.json()["cloudId"]
+
+
+def _gateway_url(base_url: str, path: str) -> str:
+    return f"https://api.atlassian.com/ex/jira/{get_cloud_id(base_url)}{path}"
+
+
+def verify_auth(base_url: str, email: str, token: str) -> bool:
+    """Confirm the credentials are actually authenticated.
+
+    Jira's /search/jql endpoint returns 200 with an empty issue list for bad
+    credentials instead of a 401 (it silently falls back to an anonymous,
+    no-project-access view) — so a search alone can't distinguish "no
+    matches" from "auth is broken". Call this once before relying on search
+    results for anything unattended (e.g. a scheduled job with no human
+    watching for a suspicious all-zero run).
+    """
+    resp = requests.get(_gateway_url(base_url, "/rest/api/3/myself"), auth=_auth(email, token))
+    return resp.status_code == 200
+
+
 def get_capex_field_id(base_url: str, email: str, token: str) -> str | None:
     """Discover the Jira custom field ID for 'Capex Project Type'."""
     url = f"{base_url}/rest/api/3/field"
