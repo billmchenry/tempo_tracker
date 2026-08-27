@@ -1,0 +1,50 @@
+name: CapEx/Component Audit Watchdog
+
+on:
+  schedule:
+    - cron: '0 13 * * 1-4'  # 9:00 AM Eastern (EDT), Monday-Thursday — 2h buffer after the 7:00 AM audit
+  workflow_dispatch:          # manual trigger from GitHub Actions UI
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for today's audit run, report if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TODAY=$(date -u +%Y-%m-%d)
+
+          RAN_TODAY=$(gh run list --repo "$REPO" --workflow=capex_component_audit.yml \
+            --json createdAt --jq "[.[] | select(.createdAt >= \"${TODAY}T00:00:00Z\")] | length")
+
+          if [ "$RAN_TODAY" -gt 0 ]; then
+            echo "Audit already ran today (${RAN_TODAY} run(s)). Nothing to do."
+            exit 0
+          fi
+
+          TITLE="Missed run: ${TODAY} — CapEx/Component Field Audit"
+
+          # Idempotency guard: don't file a second report for the same day
+          # if this watchdog itself gets triggered more than once.
+          EXISTING=$(gh issue list --repo "$REPO" --state open \
+            --search "\"${TITLE}\" in:title" --json number --jq 'length')
+
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Missed-run issue for ${TODAY} already exists. Skipping."
+            exit 0
+          fi
+
+          gh issue create --repo "$REPO" \
+            --title "${TITLE}" \
+            --assignee billmchenry \
+            --body "The scheduled CapEx/Component Field Audit (cron \`0 11 * * 1-4\`, expected ~7:00 AM Eastern) had not run as of $(date -u +%H:%M) UTC on ${TODAY}.
+
+          To run it now: \`gh workflow run capex_component_audit.yml\`, or use the Actions tab in GitHub."
