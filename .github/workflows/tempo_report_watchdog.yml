@@ -1,0 +1,51 @@
+name: Tempo CapEx Report Watchdog
+
+on:
+  schedule:
+    - cron: '0 13 * * 5'  # 7:00 AM Mountain (MDT), Friday — 6h buffer after the 7:00 AM UTC trigger,
+                           # ~3h after the ~10:00 AM UTC landing time GitHub's typical Friday delay produces
+  workflow_dispatch:          # manual trigger from GitHub Actions UI
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for today's report run, report if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TODAY=$(date -u +%Y-%m-%d)
+
+          RAN_TODAY=$(gh run list --repo "$REPO" --workflow=tempo_report.yml \
+            --json createdAt --jq "[.[] | select(.createdAt >= \"${TODAY}T00:00:00Z\")] | length")
+
+          if [ "$RAN_TODAY" -gt 0 ]; then
+            echo "Report already ran today (${RAN_TODAY} run(s)). Nothing to do."
+            exit 0
+          fi
+
+          TITLE="Missed run: ${TODAY} — Tempo CapEx Report"
+
+          # Idempotency guard: don't file a second report for the same day
+          # if this watchdog itself gets triggered more than once.
+          EXISTING=$(gh issue list --repo "$REPO" --state open \
+            --search "\"${TITLE}\" in:title" --json number --jq 'length')
+
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Missed-run issue for ${TODAY} already exists. Skipping."
+            exit 0
+          fi
+
+          gh issue create --repo "$REPO" \
+            --title "${TITLE}" \
+            --assignee billmchenry \
+            --body "The scheduled Tempo CapEx Report (cron \`0 7 * * 5\`, expected ~4:00 AM Mountain) had not run as of $(date -u +%H:%M) UTC on ${TODAY}.
+
+          To run it now: \`gh workflow run tempo_report.yml\`, or use the Actions tab in GitHub."
