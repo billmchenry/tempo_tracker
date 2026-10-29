@@ -79,10 +79,7 @@ def _hub_channel_for_team(team_name: str) -> str | None:
 # Circle label ("Circle1".."Circle4") -> Hub channel, reusing the conversation
 # IDs already assigned to each Circle's team in teams.json.
 CIRCLE_HUB_CHANNELS = {
-    "1": _hub_channel_for_team("Agent Experience Circle 1"),
-    "2": _hub_channel_for_team("Agent Experience Circle 2"),
-    "3": _hub_channel_for_team("Agent Experience Circle 3"),
-    "4": _hub_channel_for_team("Agent Platform- Circle 4"),
+    "4": _hub_channel_for_team("Agent Experience Team"),
 }
 
 # Tickets with no Circle label, or more than one, go here for manual triage.
